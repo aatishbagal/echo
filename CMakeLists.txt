@@ -4,29 +4,41 @@ project(Echo VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find packages
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBSODIUM REQUIRED libsodium)
-find_package(OpenSSL REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LZ4 REQUIRED liblz4)
+# Platform-specific settings
+if(WIN32)
+    # Windows-specific settings
+    add_definitions(-DWIN32_LEAN_AND_MEAN)
+    add_definitions(-DNOMINMAX)
+elseif(UNIX AND NOT APPLE)
+    # Linux-specific settings
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBSODIUM REQUIRED libsodium)
+    pkg_check_modules(LZ4 REQUIRED liblz4)
+elseif(APPLE)
+    # macOS-specific settings
+endif()
 
-# Add SimpleBLE
-add_subdirectory(external/simpleble)
+# Find common packages
+find_package(OpenSSL REQUIRED)
+
+# Add SimpleBLE as subdirectory
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/simpleble/simpleble/CMakeLists.txt")
+    add_subdirectory(external/simpleble/simpleble)
+    set(SIMPLEBLE_TARGET "simpleble")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/simpleble/CMakeLists.txt")
+    add_subdirectory(external/simpleble)
+    set(SIMPLEBLE_TARGET "simpleble")
+else()
+    message(FATAL_ERROR "SimpleBLE not found. Run: git clone --recursive https://github.com/OpenBluetoothToolbox/SimpleBLE.git external/simpleble")
+endif()
 
 # Include directories
 include_directories(src)
-include_directories(${LIBSODIUM_INCLUDE_DIRS})
 
-# Source files
+# Source files (start minimal, expand as we build)
 set(SOURCES
     src/main.cpp
     src/core/bluetooth/BluetoothManager.cpp
-    src/core/bluetooth/DeviceDiscovery.cpp
-    src/core/protocol/BitChatProtocol.cpp
-    src/core/crypto/CryptoManager.cpp
-    src/core/mesh/MeshNetwork.cpp
-    src/core/commands/IRCParser.cpp
     src/ui/ConsoleUI.cpp
 )
 
@@ -34,13 +46,32 @@ set(SOURCES
 add_executable(echo ${SOURCES})
 
 # Link libraries
-target_link_libraries(echo 
-    simpleble
-    ${LIBSODIUM_LIBRARIES}
-    OpenSSL::SSL 
-    OpenSSL::Crypto
-    ${LZ4_LIBRARIES}
-)
+target_link_libraries(echo ${SIMPLEBLE_TARGET})
 
-# Compiler flags
-target_compile_options(echo PRIVATE ${LIBSODIUM_CFLAGS_OTHER})
+if(UNIX AND NOT APPLE)
+    target_link_libraries(echo 
+        ${LIBSODIUM_LIBRARIES}
+        ${LZ4_LIBRARIES}
+        OpenSSL::SSL 
+        OpenSSL::Crypto
+    )
+    target_compile_options(echo PRIVATE ${LIBSODIUM_CFLAGS_OTHER})
+elseif(WIN32)
+    # Windows libraries will be added via vcpkg
+    target_link_libraries(echo
+        OpenSSL::SSL 
+        OpenSSL::Crypto
+    )
+endif()
+
+# Compiler-specific options
+if(MSVC)
+    target_compile_options(echo PRIVATE /W4)
+else()
+    target_compile_options(echo PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# Enable debug symbols in debug builds
+set_target_properties(echo PROPERTIES
+    DEBUG_POSTFIX d
+)

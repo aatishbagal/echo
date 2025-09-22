@@ -1,0 +1,29 @@
+# Build directories
+build/
+*build*/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+
+# Debug files
+*.pdb
+*.dSYM/
+
+# Temporary files
+*.tmp
+*.log
