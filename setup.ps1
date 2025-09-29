@@ -37,24 +37,55 @@ Write-Success "CMake found"
 # Check Visual Studio
 $vsFound = $false
 $vsGenerator = ""
+$vsYear = ""
+$msbuildPath = ""
+
 foreach ($year in @("2022", "2019")) {
-    foreach ($edition in @("Enterprise", "Professional", "Community")) {
-        $vsPath = "${env:ProgramFiles}\Microsoft Visual Studio\$year\$edition\MSBuild\Current\Bin\MSBuild.exe"
-        if (Test-Path $vsPath) {
-            Write-Success "Visual Studio $year $edition found"
-            $vsGenerator = "Visual Studio $(if ($year -eq '2022') {'17'} else {'16'}) $year"
-            $vsFound = $true
-            break
+    foreach ($edition in @("Enterprise", "Professional", "Community", "BuildTools")) {
+        $paths = @(
+            "${env:ProgramFiles}\Microsoft Visual Studio\$year\$edition",
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio\$year\$edition"
+        )
+        
+        foreach ($basePath in $paths) {
+            $msbuild = "$basePath\MSBuild\Current\Bin\MSBuild.exe"
+            if (Test-Path $msbuild) {
+                Write-Success "Visual Studio $year $edition found at: $basePath"
+                $vsGenerator = "Visual Studio $(if ($year -eq '2022') {'17'} else {'16'}) $year"
+                $vsYear = $year
+                $msbuildPath = $msbuild
+                $vsFound = $true
+                break
+            }
         }
+        if ($vsFound) { break }
     }
     if ($vsFound) { break }
 }
 
 if (-not $vsFound) {
     Write-Error "Visual Studio 2019 or 2022 not found"
-    Write-Host "Please install Visual Studio with C++ development tools"
+    Write-Host ""
+    Write-Host "Please make sure Visual Studio 2022 is installed with:"
+    Write-Host "  - Desktop development with C++"
+    Write-Host "  - MSVC v143 or v142 build tools"
+    Write-Host "  - Windows 10/11 SDK"
+    Write-Host ""
+    Write-Host "If Visual Studio IS installed, try:"
+    Write-Host "  1. Restart your terminal/PowerShell"
+    Write-Host "  2. Run as Administrator"
+    Write-Host "  3. Repair Visual Studio installation"
     Read-Host "Press Enter to exit"
     exit 1
+}
+
+# Verify C++ tools are installed
+$vcToolsPath = "${env:ProgramFiles}\Microsoft Visual Studio\$vsYear\*\VC\Tools\MSVC"
+if (!(Test-Path $vcToolsPath)) {
+    Write-Warning "C++ build tools may not be installed"
+    Write-Host "Please ensure 'Desktop development with C++' workload is installed in Visual Studio"
+    $continue = Read-Host "Continue anyway? (y/n)"
+    if ($continue -ne "y") { exit 1 }
 }
 
 if (!(Test-Path "CMakeLists.txt")) {
@@ -244,8 +275,21 @@ Get-ChildItem -Path . -Recurse -ErrorAction SilentlyContinue | Remove-Item -Forc
 
 # Configure
 Write-Step "Running CMake configuration..."
-$vcpkgToolchain = Join-Path (Split-Path $vcpkgPath -Parent) "scripts\buildsystems\vcpkg.cmake"
-cmake .. -G $vsGenerator -DCMAKE_TOOLCHAIN_FILE="$vcpkgToolchain"
+$vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { (Resolve-Path "..\vcpkg").Path }
+$vcpkgToolchain = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+
+Write-Host "Using vcpkg toolchain: $vcpkgToolchain"
+Write-Host "Using generator: $vsGenerator"
+
+if (!(Test-Path $vcpkgToolchain)) {
+    Write-Error "vcpkg toolchain not found at: $vcpkgToolchain"
+    Write-Host "vcpkg root: $vcpkgRoot"
+    Set-Location ..
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+cmake .. -G $vsGenerator -A x64 -DCMAKE_TOOLCHAIN_FILE="$vcpkgToolchain"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "CMake configuration failed"

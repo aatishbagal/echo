@@ -42,9 +42,16 @@ REM Check Visual Studio
 set "VS_FOUND="
 set "VS_GEN=Visual Studio 17 2022"
 for %%v in (2022 2019) do (
-    for %%e in (Enterprise Professional Community) do (
+    for %%e in (Enterprise Professional Community BuildTools) do (
         if exist "%ProgramFiles%\Microsoft Visual Studio\%%v\%%e\MSBuild\Current\Bin\MSBuild.exe" (
             set "VS_FOUND=%%v %%e"
+            set "VS_PATH=%ProgramFiles%\Microsoft Visual Studio\%%v\%%e"
+            if "%%v"=="2019" set "VS_GEN=Visual Studio 16 2019"
+            goto :vs_found
+        )
+        if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\%%v\%%e\MSBuild\Current\Bin\MSBuild.exe" (
+            set "VS_FOUND=%%v %%e"
+            set "VS_PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\%%v\%%e"
             if "%%v"=="2019" set "VS_GEN=Visual Studio 16 2019"
             goto :vs_found
         )
@@ -53,7 +60,15 @@ for %%v in (2022 2019) do (
 
 if not defined VS_FOUND (
     echo Error: Visual Studio 2019/2022 not found
-    echo Please install Visual Studio with C++ development tools
+    echo.
+    echo Please make sure Visual Studio 2022 is installed with:
+    echo   - Desktop development with C++
+    echo   - MSVC build tools
+    echo   - Windows SDK
+    echo.
+    echo If installed, try:
+    echo   1. Restart your command prompt as Administrator
+    echo   2. Repair Visual Studio installation
     pause
     exit /b 1
 )
