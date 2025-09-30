@@ -47,16 +47,23 @@ bool BluetoothManager::startScanning() {
     }
     
     try {
+        // Clear previous devices
+        {
+            std::lock_guard<std::mutex> lock(devicesMutex_);
+            discoveredDevices_.clear();
+        }
+        
         // Set up scan callback
         adapter_->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
             onPeripheralFound(std::move(peripheral));
         });
         
-        // Start scanning with 5 second timeout
-        adapter_->scan_for(5000);
+        // Start continuous scanning (no timeout for better detection)
+        adapter_->scan_start();
         isScanning_ = true;
         
-        std::cout << "Started Bluetooth scanning..." << std::endl;
+        std::cout << "Started continuous Bluetooth LE scanning..." << std::endl;
+        std::cout << "Looking for BLE devices (this may take 10-15 seconds)..." << std::endl;
         return true;
         
     } catch (const std::exception& e) {
@@ -141,61 +148,49 @@ void BluetoothManager::onPeripheralFound(SimpleBLE::Peripheral peripheral) {
     }
 }
 
-bool BluetoothManager::isBitChatDevice(const SimpleBLE::Peripheral& peripheral) const {
+bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, DiscoveredDevice& device) {
     // We need to cast away const to call SimpleBLE methods
-    // This is a limitation of SimpleBLE's API design
     auto& mutable_peripheral = const_cast<SimpleBLE::Peripheral&>(peripheral);
     
     // Check if the device advertises BitChat service UUID
     auto services = mutable_peripheral.services();
     for (auto& service : services) {
-        if (service.uuid() == BITCHAT_SERVICE_UUID) {
+        std::string serviceUuid = service.uuid();
+        
+        // Convert to uppercase for comparison (UUIDs are case-insensitive)
+        std::transform(serviceUuid.begin(), serviceUuid.end(), serviceUuid.begin(), ::toupper);
+        
+        // Check for BitChat service UUID
+        if (serviceUuid.find("F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C") != std::string::npos ||
+            serviceUuid.find("F47B5E2D") != std::string::npos) {
+            
+            // This is a BitChat device!
+            std::string name = mutable_peripheral.identifier();
+            
+            // BitChat doesn't advertise device name, so use peer ID from address
+            // Extract peer ID (would come from characteristic read in full implementation)
+            device.echoUsername = "BitChat-" + device.address.substr(0, 8);
+            device.echoFingerprint = "detected";
+            
+            std::cout << "  [DEBUG] Found BitChat service UUID in device!" << std::endl;
             return true;
         }
     }
     
-    // Alternative check: look for specific manufacturer data or device name patterns
+    // Also check device name as fallback
     std::string name = mutable_peripheral.identifier();
-    return name.find("BitChat") != std::string::npos || 
-           name.find("Echo") != std::string::npos;
-}
-
-bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, DiscoveredDevice& device) {
-    // We need to cast away const to call SimpleBLE methods
-    auto& mutable_peripheral = const_cast<SimpleBLE::Peripheral&>(peripheral);
-    
-    // Check device name for Echo pattern: "Echo:Username:Fingerprint"
-    std::string name = mutable_peripheral.identifier();
-    
-    // Parse Echo device name format
-    if (name.find("Echo:") == 0 || name.find("BitChat:") == 0) {
-        // Format: "Echo:Username:Fingerprint" or "BitChat:Username:Fingerprint"
+    if (name.find("Echo:") == 0 || name.find("BitChat:") == 0 || name.find("BitChat") != std::string::npos) {
+        // Parse name format if present: "Echo:Username:Fingerprint"
         size_t firstColon = name.find(':');
         size_t secondColon = name.find(':', firstColon + 1);
         
         if (firstColon != std::string::npos && secondColon != std::string::npos) {
             device.echoUsername = name.substr(firstColon + 1, secondColon - firstColon - 1);
             device.echoFingerprint = name.substr(secondColon + 1);
-            return true;
-        }
-    }
-    
-    // Check if the device advertises BitChat/Echo service UUID
-    auto services = mutable_peripheral.services();
-    for (auto& service : services) {
-        if (service.uuid() == BITCHAT_SERVICE_UUID) {
-            // It's an Echo/BitChat device but name doesn't follow convention
-            // Use default name
+        } else {
             device.echoUsername = name;
             device.echoFingerprint = "unknown";
-            return true;
         }
-    }
-    
-    // Check for "Echo" or "BitChat" in device name (fallback)
-    if (name.find("Echo") != std::string::npos || name.find("BitChat") != std::string::npos) {
-        device.echoUsername = name;
-        device.echoFingerprint = "unknown";
         return true;
     }
     
@@ -213,6 +208,25 @@ std::vector<DiscoveredDevice> BluetoothManager::getEchoDevices() const {
     }
     
     return echoDevices;
+}
+
+bool BluetoothManager::isBitChatDevice(const SimpleBLE::Peripheral& peripheral) const {
+    // We need to cast away const to call SimpleBLE methods
+    // This is a limitation of SimpleBLE's API design
+    auto& mutable_peripheral = const_cast<SimpleBLE::Peripheral&>(peripheral);
+    
+    // Check if the device advertises BitChat service UUID
+    auto services = mutable_peripheral.services();
+    for (auto& service : services) {
+        if (service.uuid() == BITCHAT_SERVICE_UUID) {
+            return true;
+        }
+    }
+    
+    // Alternative check: look for specific manufacturer data or device name patterns
+    std::string name = mutable_peripheral.identifier();
+    return name.find("BitChat") != std::string::npos || 
+           name.find("Echo") != std::string::npos;
 }
 
 bool BluetoothManager::connectToDevice(const std::string& address) {
@@ -316,7 +330,7 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
             if (service.uuid() == BITCHAT_SERVICE_UUID) {
                 auto characteristics = service.characteristics();
                 for (auto& characteristic : characteristics) {
-                    if (characteristic.uuid() == BITCHAT_MESSAGE_CHAR_UUID) {
+                    if (characteristic.uuid() == BITCHAT_TX_CHAR_UUID) {
                         peripheral->write_request(service.uuid(), characteristic.uuid(), data);
                         return true;
                     }
