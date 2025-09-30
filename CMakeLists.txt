@@ -39,6 +39,7 @@ include_directories(src)
 set(SOURCES
     src/main.cpp
     src/core/bluetooth/BluetoothManager.cpp
+    src/core/crypto/UserIdentity.cpp
     src/ui/ConsoleUI.cpp
 )
 

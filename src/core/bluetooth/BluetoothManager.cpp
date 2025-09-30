@@ -96,9 +96,10 @@ void BluetoothManager::onPeripheralFound(SimpleBLE::Peripheral peripheral) {
     device.rssi = peripheral.rssi();
     device.isConnectable = peripheral.is_connectable();
     device.lastSeen = std::chrono::steady_clock::now();
+    device.isEchoDevice = false;
     
-    // Check if this is a BitChat device
-    bool isBitChat = isBitChatDevice(peripheral);
+    // Check if this is a BitChat/Echo device and parse Echo-specific data
+    device.isEchoDevice = parseEchoDevice(peripheral, device);
     
     // Update discovered devices list
     {
@@ -114,20 +115,30 @@ void BluetoothManager::onPeripheralFound(SimpleBLE::Peripheral peripheral) {
             // Update existing device
             it->lastSeen = device.lastSeen;
             it->rssi = device.rssi;
+            it->isEchoDevice = device.isEchoDevice;
+            it->echoUsername = device.echoUsername;
+            it->echoFingerprint = device.echoFingerprint;
         } else {
             // Add new device
             discoveredDevices_.push_back(device);
         }
     }
     
-    // Notify callback if this is a BitChat device
-    if (isBitChat && deviceDiscoveredCallback_) {
+    // Notify callback if this is an Echo device or if callback wants all devices
+    if (deviceDiscoveredCallback_) {
         deviceDiscoveredCallback_(device);
     }
     
-    std::cout << "Found device: " << device.name << " (" << device.address << ")"
-              << " RSSI: " << device.rssi << " dBm"
-              << (isBitChat ? " [BitChat]" : "") << std::endl;
+    // Print discovery info
+    if (device.isEchoDevice) {
+        std::cout << "Found Echo device: " << device.echoUsername 
+                  << " [" << device.echoFingerprint.substr(0, 8) << "] "
+                  << "(" << device.address << ") "
+                  << "RSSI: " << device.rssi << " dBm" << std::endl;
+    } else {
+        std::cout << "Found device: " << device.name << " (" << device.address << ")"
+                  << " RSSI: " << device.rssi << " dBm" << std::endl;
+    }
 }
 
 bool BluetoothManager::isBitChatDevice(const SimpleBLE::Peripheral& peripheral) const {
@@ -147,6 +158,61 @@ bool BluetoothManager::isBitChatDevice(const SimpleBLE::Peripheral& peripheral) 
     std::string name = mutable_peripheral.identifier();
     return name.find("BitChat") != std::string::npos || 
            name.find("Echo") != std::string::npos;
+}
+
+bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, DiscoveredDevice& device) {
+    // We need to cast away const to call SimpleBLE methods
+    auto& mutable_peripheral = const_cast<SimpleBLE::Peripheral&>(peripheral);
+    
+    // Check device name for Echo pattern: "Echo:Username:Fingerprint"
+    std::string name = mutable_peripheral.identifier();
+    
+    // Parse Echo device name format
+    if (name.find("Echo:") == 0 || name.find("BitChat:") == 0) {
+        // Format: "Echo:Username:Fingerprint" or "BitChat:Username:Fingerprint"
+        size_t firstColon = name.find(':');
+        size_t secondColon = name.find(':', firstColon + 1);
+        
+        if (firstColon != std::string::npos && secondColon != std::string::npos) {
+            device.echoUsername = name.substr(firstColon + 1, secondColon - firstColon - 1);
+            device.echoFingerprint = name.substr(secondColon + 1);
+            return true;
+        }
+    }
+    
+    // Check if the device advertises BitChat/Echo service UUID
+    auto services = mutable_peripheral.services();
+    for (auto& service : services) {
+        if (service.uuid() == BITCHAT_SERVICE_UUID) {
+            // It's an Echo/BitChat device but name doesn't follow convention
+            // Use default name
+            device.echoUsername = name;
+            device.echoFingerprint = "unknown";
+            return true;
+        }
+    }
+    
+    // Check for "Echo" or "BitChat" in device name (fallback)
+    if (name.find("Echo") != std::string::npos || name.find("BitChat") != std::string::npos) {
+        device.echoUsername = name;
+        device.echoFingerprint = "unknown";
+        return true;
+    }
+    
+    return false;
+}
+
+std::vector<DiscoveredDevice> BluetoothManager::getEchoDevices() const {
+    std::lock_guard<std::mutex> lock(devicesMutex_);
+    std::vector<DiscoveredDevice> echoDevices;
+    
+    for (const auto& device : discoveredDevices_) {
+        if (device.isEchoDevice) {
+            echoDevices.push_back(device);
+        }
+    }
+    
+    return echoDevices;
 }
 
 bool BluetoothManager::connectToDevice(const std::string& address) {

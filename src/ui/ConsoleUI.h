@@ -1,9 +1,11 @@
 #pragma once
 
 #include "core/bluetooth/BluetoothManager.h"
+#include "core/crypto/UserIdentity.h"
 #include <string>
 #include <atomic>
 #include <thread>
+#include <memory>
 
 namespace echo {
 
@@ -12,14 +14,14 @@ public:
     ConsoleUI();
     ~ConsoleUI();
     
-    void run(BluetoothManager& bluetoothManager);
+    void run(BluetoothManager& bluetoothManager, UserIdentity& identity);
     
 private:
     std::atomic<bool> running_;
     
     void printHelp() const;
     void printDevices(const BluetoothManager& bluetoothManager) const;
-    void handleCommand(const std::string& command, BluetoothManager& bluetoothManager);
+    void handleCommand(const std::string& command, BluetoothManager& bluetoothManager, UserIdentity& identity);
     
     // Event handlers for Bluetooth events
     void onDeviceDiscovered(const DiscoveredDevice& device);

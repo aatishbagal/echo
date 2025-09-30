@@ -1,4 +1,5 @@
 #include "ConsoleUI.h"
+#include "core/crypto/UserIdentity.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -15,7 +16,7 @@ ConsoleUI::~ConsoleUI() {
     running_ = false;
 }
 
-void ConsoleUI::run(BluetoothManager& bluetoothManager) {
+void ConsoleUI::run(BluetoothManager& bluetoothManager, UserIdentity& identity) {
     running_ = true;
     
     // Set up Bluetooth event callbacks
@@ -58,24 +59,25 @@ void ConsoleUI::run(BluetoothManager& bluetoothManager) {
             break;
         }
         
-        handleCommand(input, bluetoothManager);
+        handleCommand(input, bluetoothManager, identity);
     }
 }
 
 void ConsoleUI::printHelp() const {
     std::cout << "\n=== Echo Console Commands ===" << std::endl;
-    std::cout << "scan          - Start scanning for BitChat devices" << std::endl;
+    std::cout << "scan          - Start scanning for Echo/Bluetooth devices" << std::endl;
     std::cout << "stop          - Stop scanning" << std::endl;
     std::cout << "devices       - List discovered devices" << std::endl;
-    std::cout << "connect <addr>- Connect to device by address" << std::endl;
-    std::cout << "disconnect <addr> - Disconnect from device" << std::endl;
+    std::cout << "whoami        - Show your identity" << std::endl;
+    std::cout << "/nick <name>  - Change your username" << std::endl;
+    std::cout << "connect <addr>- Connect to device (future feature)" << std::endl;
     std::cout << "help          - Show this help" << std::endl;
     std::cout << "quit/exit     - Exit application" << std::endl;
     std::cout << "==============================\n" << std::endl;
     std::cout << "echo> ";
 }
 
-void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& bluetoothManager) {
+void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& bluetoothManager, UserIdentity& identity) {
     std::istringstream iss(command);
     std::string cmd;
     iss >> cmd;
@@ -94,27 +96,32 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
     else if (cmd == "devices") {
         printDevices(bluetoothManager);
     }
+    else if (cmd == "whoami") {
+        std::cout << "\nYour Echo Identity:" << std::endl;
+        std::cout << "  Username: " << identity.getUsername() << std::endl;
+        std::cout << "  Fingerprint: " << identity.getFingerprint() << std::endl;
+        std::cout << std::endl;
+    }
+    else if (cmd == "/nick") {
+        std::string newUsername;
+        iss >> newUsername;
+        if (newUsername.empty()) {
+            std::cout << "Usage: /nick <new_username>" << std::endl;
+        } else {
+            identity.setUsername(newUsername);
+            identity.saveToFile("echo_identity.dat");
+            std::cout << "Username changed to: " << newUsername << std::endl;
+            std::cout << "Note: Restart Echo for the new name to be advertised" << std::endl;
+        }
+    }
     else if (cmd == "connect") {
         std::string address;
         iss >> address;
         if (address.empty()) {
             std::cout << "Usage: connect <device_address>" << std::endl;
         } else {
-            if (bluetoothManager.connectToDevice(address)) {
-                std::cout << "Attempting to connect to " << address << std::endl;
-            } else {
-                std::cout << "Failed to connect to " << address << std::endl;
-            }
-        }
-    }
-    else if (cmd == "disconnect") {
-        std::string address;
-        iss >> address;
-        if (address.empty()) {
-            std::cout << "Usage: disconnect <device_address>" << std::endl;
-        } else {
-            bluetoothManager.disconnectFromDevice(address);
-            std::cout << "Disconnected from " << address << std::endl;
+            std::cout << "Note: Echo uses mesh networking - connections not required for messaging" << std::endl;
+            std::cout << "Direct connections will be implemented for file transfers" << std::endl;
         }
     }
     else if (cmd == "help") {
@@ -136,30 +143,75 @@ void ConsoleUI::printDevices(const BluetoothManager& bluetoothManager) const {
         return;
     }
     
-    std::cout << "\n=== Discovered Devices ===" << std::endl;
-    std::cout << std::left << std::setw(20) << "Name" 
-              << std::setw(18) << "Address" 
-              << std::setw(8) << "RSSI" 
-              << std::setw(12) << "Connectable"
-              << "Last Seen" << std::endl;
-    std::cout << std::string(70, '-') << std::endl;
+    // Separate Echo devices from regular BT devices
+    std::vector<const DiscoveredDevice*> echoDevices;
+    std::vector<const DiscoveredDevice*> regularDevices;
     
     for (const auto& device : devices) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - device.lastSeen).count();
-        
-        std::cout << std::left << std::setw(20) << device.name.substr(0, 19)
-                  << std::setw(18) << device.address
-                  << std::setw(8) << device.rssi
-                  << std::setw(12) << (device.isConnectable ? "Yes" : "No")
-                  << elapsed << "s ago" << std::endl;
+        if (device.isEchoDevice) {
+            echoDevices.push_back(&device);
+        } else {
+            regularDevices.push_back(&device);
+        }
     }
-    std::cout << "========================\n" << std::endl;
+    
+    // Show Echo devices first
+    if (!echoDevices.empty()) {
+        std::cout << "\n=== Echo Network Devices ===" << std::endl;
+        std::cout << std::left << std::setw(20) << "Username" 
+                  << std::setw(12) << "Fingerprint"
+                  << std::setw(18) << "Address" 
+                  << std::setw(8) << "RSSI"
+                  << "Last Seen" << std::endl;
+        std::cout << std::string(75, '-') << std::endl;
+        
+        for (const auto* device : echoDevices) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - device->lastSeen).count();
+            
+            std::string fingerprint = device->echoFingerprint.substr(0, 8) + "...";
+            
+            std::cout << std::left << std::setw(20) << device->echoUsername
+                      << std::setw(12) << fingerprint
+                      << std::setw(18) << device->address
+                      << std::setw(8) << device->rssi
+                      << elapsed << "s ago" << std::endl;
+        }
+        std::cout << "==========================\n" << std::endl;
+    }
+    
+    // Show regular Bluetooth devices
+    if (!regularDevices.empty()) {
+        std::cout << "\n=== Other Bluetooth Devices ===" << std::endl;
+        std::cout << std::left << std::setw(20) << "Name" 
+                  << std::setw(18) << "Address" 
+                  << std::setw(8) << "RSSI"
+                  << "Last Seen" << std::endl;
+        std::cout << std::string(65, '-') << std::endl;
+        
+        for (const auto* device : regularDevices) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - device->lastSeen).count();
+            
+            std::cout << std::left << std::setw(20) << device->name.substr(0, 19)
+                      << std::setw(18) << device->address
+                      << std::setw(8) << device->rssi
+                      << elapsed << "s ago" << std::endl;
+        }
+        std::cout << "==============================\n" << std::endl;
+    }
 }
 
 void ConsoleUI::onDeviceDiscovered(const DiscoveredDevice& device) {
-    std::cout << "\n[DISCOVERED] " << device.name << " (" << device.address << ") "
-              << "RSSI: " << device.rssi << " dBm" << std::endl;
+    if (device.isEchoDevice) {
+        std::cout << "\n[ECHO DEVICE] " << device.echoUsername 
+                  << " [" << device.echoFingerprint.substr(0, 8) << "...] "
+                  << "(" << device.address << ") "
+                  << "RSSI: " << device.rssi << " dBm" << std::endl;
+    } else {
+        std::cout << "\n[BLUETOOTH] " << device.name << " (" << device.address << ") "
+                  << "RSSI: " << device.rssi << " dBm" << std::endl;
+    }
     std::cout << "echo> ";
     std::cout.flush();
 }
