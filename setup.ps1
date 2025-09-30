@@ -124,18 +124,21 @@ Write-Host ""
 # Install vcpkg and dependencies
 Write-Step "Setting up vcpkg and dependencies..."
 
-$vcpkgPath = "vcpkg"
+$vcpkgRoot = ""
+$vcpkgPath = ""
 $useExistingVcpkg = $false
 
 # Check for existing vcpkg
 if ($env:VCPKG_ROOT -and (Test-Path "$env:VCPKG_ROOT\vcpkg.exe")) {
     Write-Success "Using existing vcpkg at: $env:VCPKG_ROOT"
+    $vcpkgRoot = $env:VCPKG_ROOT
     $vcpkgPath = "$env:VCPKG_ROOT\vcpkg.exe"
     $useExistingVcpkg = $true
 } elseif (Test-Path "vcpkg\vcpkg.exe") {
     Write-Success "Using local vcpkg installation"
-    $vcpkgPath = "vcpkg\vcpkg.exe"
-    $env:VCPKG_ROOT = (Resolve-Path "vcpkg").Path
+    $vcpkgRoot = (Resolve-Path "vcpkg").Path
+    $vcpkgPath = "$vcpkgRoot\vcpkg.exe"
+    $env:VCPKG_ROOT = $vcpkgRoot
     $useExistingVcpkg = $true
 }
 
@@ -152,25 +155,60 @@ if (-not $useExistingVcpkg) {
         exit 1
     }
     
-    .\vcpkg\bootstrap-vcpkg.bat
+    Set-Location vcpkg
+    .\bootstrap-vcpkg.bat
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to bootstrap vcpkg"
+        Set-Location ..
         Read-Host "Press Enter to exit"
         exit 1
     }
+    Set-Location ..
     
-    $vcpkgPath = "vcpkg\vcpkg.exe"
-    $env:VCPKG_ROOT = (Resolve-Path "vcpkg").Path
-    Write-Success "vcpkg installed"
+    $vcpkgRoot = (Resolve-Path "vcpkg").Path
+    $vcpkgPath = "$vcpkgRoot\vcpkg.exe"
+    $env:VCPKG_ROOT = $vcpkgRoot
+    Write-Success "vcpkg installed at: $vcpkgRoot"
 }
 
+# Verify vcpkg executable exists
+if (!(Test-Path $vcpkgPath)) {
+    Write-Error "vcpkg.exe not found at: $vcpkgPath"
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+# Verify toolchain file exists
+$vcpkgToolchain = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
+if (!(Test-Path $vcpkgToolchain)) {
+    Write-Error "vcpkg toolchain not found at: $vcpkgToolchain"
+    Write-Host "vcpkg may not be properly installed. Try deleting the vcpkg folder and running again."
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+Write-Success "vcpkg toolchain found at: $vcpkgToolchain"
+
 Write-Step "Installing dependencies (libsodium, openssl, lz4)..."
-$packages = @("libsodium:x64-windows", "openssl:x64-windows", "lz4:x64-windows")
+Write-Host "This may take 5-10 minutes on first run..."
+$packages = @("libsodium:x64-windows", "openssl:x64-windows", "lz4:x64-windows", "python3:x64-windows")
 foreach ($pkg in $packages) {
     Write-Host "  Installing $pkg..."
     & $vcpkgPath install $pkg
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to install $pkg, but continuing..."
+    }
 }
 Write-Success "Dependencies installed"
+
+# Verify at least one package was installed
+$installedDir = "$vcpkgRoot\installed\x64-windows"
+if (!(Test-Path $installedDir)) {
+    Write-Error "No packages were installed. Check vcpkg installation."
+    Write-Host "vcpkg root: $vcpkgRoot"
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+Write-Success "Verified packages in: $installedDir"
 
 Write-Host ""
 
@@ -275,15 +313,21 @@ Get-ChildItem -Path . -Recurse -ErrorAction SilentlyContinue | Remove-Item -Forc
 
 # Configure
 Write-Step "Running CMake configuration..."
-$vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { (Resolve-Path "..\vcpkg").Path }
-$vcpkgToolchain = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
 
-Write-Host "Using vcpkg toolchain: $vcpkgToolchain"
-Write-Host "Using generator: $vsGenerator"
+Write-Host "Configuration details:"
+Write-Host "  vcpkg root: $vcpkgRoot"
+Write-Host "  vcpkg toolchain: $vcpkgToolchain"
+Write-Host "  Generator: $vsGenerator"
+Write-Host "  Architecture: x64"
+Write-Host ""
 
+# Final verification before CMake
 if (!(Test-Path $vcpkgToolchain)) {
-    Write-Error "vcpkg toolchain not found at: $vcpkgToolchain"
-    Write-Host "vcpkg root: $vcpkgRoot"
+    Write-Error "ERROR: vcpkg toolchain file does not exist!"
+    Write-Host "Expected at: $vcpkgToolchain"
+    Write-Host ""
+    Write-Host "Contents of vcpkg directory:"
+    Get-ChildItem $vcpkgRoot
     Set-Location ..
     Read-Host "Press Enter to exit"
     exit 1
