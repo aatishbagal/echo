@@ -5,9 +5,9 @@ $ErrorActionPreference = "Stop"
 
 # Colors
 function Write-Step($text) { Write-Host $text -ForegroundColor Cyan }
-function Write-Success($text) { Write-Host "✓ $text" -ForegroundColor Green }
-function Write-Warning($text) { Write-Host "⚠ $text" -ForegroundColor Yellow }
-function Write-Error($text) { Write-Host "✗ $text" -ForegroundColor Red }
+function Write-Success($text) { Write-Host "[OK] $text" -ForegroundColor Green }
+function Write-Warning($text) { Write-Host "[WARNING] $text" -ForegroundColor Yellow }
+function Write-Error($text) { Write-Host "[ERROR] $text" -ForegroundColor Red }
 
 Write-Host "===============================================" -ForegroundColor Green
 Write-Host "Echo - BitChat Compatible Desktop Messaging" -ForegroundColor Green
@@ -105,52 +105,43 @@ if (!(Test-Path ".git")) {
 
 Write-Host ""
 
-# Install Chocolatey if not present (for automatic dependency installation)
-Write-Step "Checking for Chocolatey package manager..."
-if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
-    Write-Warning "Chocolatey not found. Installing Chocolatey for automatic dependency management..."
-    Set-ExecutionPolicy Bypass -Scope Process -Force
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-    try {
-        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        Write-Success "Chocolatey installed"
-    } catch {
-        Write-Warning "Chocolatey installation failed. Will try vcpkg instead..."
-    }
+# Install vcpkg and dependencies in build directory
+Write-Step "Setting up vcpkg and dependencies in build directory..."
+
+# Create build directory if it doesn't exist
+if (!(Test-Path "build")) {
+    New-Item -ItemType Directory -Path "build" -Force | Out-Null
 }
-
-Write-Host ""
-
-# Install vcpkg and dependencies
-Write-Step "Setting up vcpkg and dependencies..."
 
 $vcpkgRoot = ""
 $vcpkgPath = ""
 $useExistingVcpkg = $false
 
-# Check for existing vcpkg
-if ($env:VCPKG_ROOT -and (Test-Path "$env:VCPKG_ROOT\vcpkg.exe")) {
+# Check for existing vcpkg in build directory
+if (Test-Path "build\vcpkg\vcpkg.exe") {
+    Write-Success "Using local vcpkg installation in build directory"
+    $vcpkgRoot = (Resolve-Path "build\vcpkg").Path
+    $vcpkgPath = "$vcpkgRoot\vcpkg.exe"
+    $env:VCPKG_ROOT = $vcpkgRoot
+    $useExistingVcpkg = $true
+} elseif ($env:VCPKG_ROOT -and (Test-Path "$env:VCPKG_ROOT\vcpkg.exe")) {
     Write-Success "Using existing vcpkg at: $env:VCPKG_ROOT"
     $vcpkgRoot = $env:VCPKG_ROOT
     $vcpkgPath = "$env:VCPKG_ROOT\vcpkg.exe"
     $useExistingVcpkg = $true
-} elseif (Test-Path "vcpkg\vcpkg.exe") {
-    Write-Success "Using local vcpkg installation"
-    $vcpkgRoot = (Resolve-Path "vcpkg").Path
-    $vcpkgPath = "$vcpkgRoot\vcpkg.exe"
-    $env:VCPKG_ROOT = $vcpkgRoot
-    $useExistingVcpkg = $true
 }
 
 if (-not $useExistingVcpkg) {
-    Write-Step "Installing vcpkg..."
-    if (Test-Path "vcpkg") {
-        Remove-Item -Recurse -Force "vcpkg"
+    Write-Step "Installing vcpkg in build directory..."
+    if (Test-Path "build\vcpkg") {
+        Remove-Item -Recurse -Force "build\vcpkg"
     }
     
+    Set-Location build
     git clone https://github.com/Microsoft/vcpkg.git 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to clone vcpkg"
+        Set-Location ..
         Read-Host "Press Enter to exit"
         exit 1
     }
@@ -159,13 +150,13 @@ if (-not $useExistingVcpkg) {
     .\bootstrap-vcpkg.bat
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to bootstrap vcpkg"
-        Set-Location ..
+        Set-Location ..\..
         Read-Host "Press Enter to exit"
         exit 1
     }
-    Set-Location ..
+    Set-Location ..\..
     
-    $vcpkgRoot = (Resolve-Path "vcpkg").Path
+    $vcpkgRoot = (Resolve-Path "build\vcpkg").Path
     $vcpkgPath = "$vcpkgRoot\vcpkg.exe"
     $env:VCPKG_ROOT = $vcpkgRoot
     Write-Success "vcpkg installed at: $vcpkgRoot"
@@ -182,7 +173,7 @@ if (!(Test-Path $vcpkgPath)) {
 $vcpkgToolchain = "$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
 if (!(Test-Path $vcpkgToolchain)) {
     Write-Error "vcpkg toolchain not found at: $vcpkgToolchain"
-    Write-Host "vcpkg may not be properly installed. Try deleting the vcpkg folder and running again."
+    Write-Host "vcpkg may not be properly installed. Try deleting the build\vcpkg folder and running again."
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -217,7 +208,7 @@ Write-Step "Creating directory structure..."
 $dirs = @(
     "src\core\bluetooth", "src\core\protocol", "src\core\crypto",
     "src\core\mesh", "src\core\commands", "src\ui", "src\utils",
-    "external", "tests", "docs", "build"
+    "external", "tests", "docs"
 )
 foreach ($dir in $dirs) {
     if (!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -240,9 +231,6 @@ out/
 .vs/
 *.vcxproj.user
 *.sln.docstates
-
-# vcpkg
-vcpkg/
 
 # Binaries
 *.exe
@@ -308,8 +296,8 @@ Write-Step "Building Echo..."
 
 Set-Location build
 
-# Clean previous build
-Get-ChildItem -Path . -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+# Clean previous build (but keep vcpkg)
+Get-ChildItem -Path . -Recurse -Exclude vcpkg -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "vcpkg" } | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
 
 # Configure
 Write-Step "Running CMake configuration..."
@@ -323,7 +311,7 @@ Write-Host ""
 
 # Final verification before CMake
 if (!(Test-Path $vcpkgToolchain)) {
-    Write-Error "ERROR: vcpkg toolchain file does not exist!"
+    Write-Error "vcpkg toolchain file does not exist!"
     Write-Host "Expected at: $vcpkgToolchain"
     Write-Host ""
     Write-Host "Contents of vcpkg directory:"

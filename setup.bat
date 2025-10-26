@@ -1,4 +1,3 @@
-
 @echo off
 REM Echo Setup Script for Windows - Single Click Install
 REM Equivalent to setup.sh for Linux
@@ -14,7 +13,7 @@ echo.
 
 REM Check CMakeLists.txt
 if not exist "CMakeLists.txt" (
-    echo Error: CMakeLists.txt not found. Are you in the Echo project directory?
+    echo [ERROR] CMakeLists.txt not found. Are you in the Echo project directory?
     pause
     exit /b 1
 )
@@ -22,7 +21,7 @@ if not exist "CMakeLists.txt" (
 REM Check Git
 where git >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Error: Git not found
+    echo [ERROR] Git not found
     echo Please install Git from https://git-scm.com/
     pause
     exit /b 1
@@ -32,7 +31,7 @@ echo [OK] Git found
 REM Check CMake
 where cmake >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Error: CMake not found
+    echo [ERROR] CMake not found
     echo Please install CMake from https://cmake.org/
     pause
     exit /b 1
@@ -60,7 +59,7 @@ for %%v in (2022 2019) do (
 )
 
 if not defined VS_FOUND (
-    echo Error: Visual Studio 2019/2022 not found
+    echo [ERROR] Visual Studio 2019/2022 not found
     echo.
     echo Please make sure Visual Studio 2022 is installed with:
     echo   - Desktop development with C++
@@ -88,8 +87,18 @@ if not exist ".git" (
     echo.
 )
 
-REM Setup vcpkg
-echo Setting up vcpkg and dependencies...
+REM Create build directory if it doesn't exist
+if not exist "build" mkdir "build"
+
+REM Setup vcpkg in build directory
+echo Setting up vcpkg and dependencies in build directory...
+
+if exist "build\vcpkg\vcpkg.exe" (
+    echo [OK] Using local vcpkg installation in build directory
+    set "VCPKG_EXE=build\vcpkg\vcpkg.exe"
+    set "VCPKG_ROOT=%cd%\build\vcpkg"
+    goto :vcpkg_ready
+)
 
 if defined VCPKG_ROOT (
     if exist "%VCPKG_ROOT%\vcpkg.exe" (
@@ -99,31 +108,32 @@ if defined VCPKG_ROOT (
     )
 )
 
-if exist "vcpkg\vcpkg.exe" (
-    echo [OK] Using local vcpkg installation
-    set "VCPKG_EXE=vcpkg\vcpkg.exe"
-    goto :vcpkg_ready
-)
+REM Install vcpkg in build directory
+echo Installing vcpkg in build directory...
+if exist "build\vcpkg" rmdir /s /q "build\vcpkg"
 
-REM Install vcpkg
-echo Installing vcpkg...
-if exist "vcpkg" rmdir /s /q "vcpkg"
+cd build
 git clone https://github.com/Microsoft/vcpkg.git
 if %errorlevel% neq 0 (
-    echo Error: Failed to clone vcpkg
+    echo [ERROR] Failed to clone vcpkg
+    cd ..
     pause
     exit /b 1
 )
 
-call vcpkg\bootstrap-vcpkg.bat
+cd vcpkg
+call bootstrap-vcpkg.bat
 if %errorlevel% neq 0 (
-    echo Error: Failed to bootstrap vcpkg
+    echo [ERROR] Failed to bootstrap vcpkg
+    cd ..\..
     pause
     exit /b 1
 )
 
-set "VCPKG_EXE=vcpkg\vcpkg.exe"
-echo [OK] vcpkg installed
+cd ..\..
+set "VCPKG_EXE=build\vcpkg\vcpkg.exe"
+set "VCPKG_ROOT=%cd%\build\vcpkg"
+echo [OK] vcpkg installed at: %VCPKG_ROOT%
 
 :vcpkg_ready
 echo.
@@ -132,7 +142,7 @@ REM Install dependencies
 echo Installing dependencies (libsodium, openssl, lz4)...
 echo This may take several minutes...
 
-for %%p in (libsodium:x64-windows openssl:x64-windows lz4:x64-windows) do (
+for %%p in (libsodium:x64-windows openssl:x64-windows lz4:x64-windows python3:x64-windows) do (
     echo   Installing %%p...
     "%VCPKG_EXE%" install %%p
 )
@@ -144,7 +154,7 @@ echo Creating directory structure...
 for %%d in (
     "src\core\bluetooth" "src\core\protocol" "src\core\crypto"
     "src\core\mesh" "src\core\commands" "src\ui" "src\utils"
-    "external" "tests" "docs" "build"
+    "external" "tests" "docs"
 ) do (
     if not exist "%%d" mkdir "%%d"
 )
@@ -163,9 +173,6 @@ if not exist ".gitignore" (
         echo # Visual Studio
         echo .vs/
         echo *.vcxproj.user
-        echo.
-        echo # vcpkg
-        echo vcpkg/
         echo.
         echo # Binaries
         echo *.exe
@@ -191,7 +198,7 @@ if exist ".gitmodules" del ".gitmodules"
 
 git clone --recursive https://github.com/OpenBluetoothToolbox/SimpleBLE.git external/simpleble
 if %errorlevel% neq 0 (
-    echo Error: Failed to clone SimpleBLE
+    echo [ERROR] Failed to clone SimpleBLE
     pause
     exit /b 1
 )
@@ -201,7 +208,7 @@ if exist "external\simpleble\simpleble\CMakeLists.txt" (
 ) else if exist "external\simpleble\CMakeLists.txt" (
     echo [OK] SimpleBLE setup complete!
 ) else (
-    echo Error: SimpleBLE setup failed
+    echo [ERROR] SimpleBLE setup failed
     pause
     exit /b 1
 )
@@ -211,20 +218,40 @@ echo Building Echo...
 
 cd build
 
-REM Clean
-for /d %%i in (*) do rmdir /s /q "%%i" >nul 2>&1
-del /q * >nul 2>&1
+REM Clean build files but keep vcpkg
+echo Cleaning previous build (preserving vcpkg)...
+for /d %%i in (*) do (
+    if not "%%i"=="vcpkg" rmdir /s /q "%%i" >nul 2>&1
+)
+for %%i in (*) do (
+    if not "%%~nxi"=="vcpkg" del /q "%%i" >nul 2>&1
+)
 
 REM Get vcpkg toolchain path
-for %%i in ("%VCPKG_EXE%") do set "VCPKG_DIR=%%~dpi"
-set "VCPKG_TOOLCHAIN=%VCPKG_DIR%scripts\buildsystems\vcpkg.cmake"
+set "VCPKG_TOOLCHAIN=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
+
+if not exist "%VCPKG_TOOLCHAIN%" (
+    echo [ERROR] vcpkg toolchain not found at: %VCPKG_TOOLCHAIN%
+    cd ..
+    pause
+    exit /b 1
+)
+
+echo [OK] vcpkg toolchain found at: %VCPKG_TOOLCHAIN%
+echo.
 
 REM Configure
 echo Running CMake configuration...
-cmake .. -G "%VS_GEN%" -DCMAKE_TOOLCHAIN_FILE="%VCPKG_TOOLCHAIN%"
+echo Configuration details:
+echo   vcpkg root: %VCPKG_ROOT%
+echo   vcpkg toolchain: %VCPKG_TOOLCHAIN%
+echo   Generator: %VS_GEN%
+echo.
+
+cmake .. -G "%VS_GEN%" -A x64 -DCMAKE_TOOLCHAIN_FILE="%VCPKG_TOOLCHAIN%"
 
 if %errorlevel% neq 0 (
-    echo Error: CMake configuration failed
+    echo [ERROR] CMake configuration failed
     cd ..
     pause
     exit /b 1
@@ -236,7 +263,7 @@ echo Building project (this may take a few minutes)...
 cmake --build . --config Release --parallel
 
 if %errorlevel% neq 0 (
-    echo Error: Build failed
+    echo [ERROR] Build failed
     cd ..
     pause
     exit /b 1
