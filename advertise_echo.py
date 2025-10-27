@@ -11,6 +11,7 @@ import dbus.mainloop.glib
 import dbus.service
 from gi.repository import GLib
 import argparse
+import platform
 
 BLUEZ_SERVICE_NAME = 'org.bluez'
 LE_ADVERTISING_MANAGER_IFACE = 'org.bluez.LEAdvertisingManager1'
@@ -24,12 +25,12 @@ ECHO_SERVICE_UUID = 'F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C'
 class Advertisement(dbus.service.Object):
     PATH_BASE = '/org/bluez/echo/advertisement'
 
-    def __init__(self, bus, index, advertising_type, peer_id):
+    def __init__(self, bus, index, advertising_type, peer_id, username, os_type):
         self.path = self.PATH_BASE + str(index)
         self.bus = bus
         self.ad_type = advertising_type
         self.service_uuids = [ECHO_SERVICE_UUID]
-        self.local_name = f'Echo-{peer_id}'
+        self.local_name = f'Echo-{username}[{os_type}]'
         self.include_tx_power = True
         dbus.service.Object.__init__(self, bus, self.path)
 
@@ -77,6 +78,10 @@ def main():
     parser.add_argument('--username', default='EchoUser', help='Username')
     args = parser.parse_args()
 
+    os_type = platform.system().lower()
+    if os_type == 'darwin':
+        os_type = 'macos'
+
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
     bus = dbus.SystemBus()
@@ -100,7 +105,8 @@ def main():
     ad_manager = dbus.Interface(bus.get_object(BLUEZ_SERVICE_NAME, adapter),
                                  LE_ADVERTISING_MANAGER_IFACE)
 
-    advertisement = Advertisement(bus, 0, 'peripheral', args.peer_id[:8])
+    # advertisement = Advertisement(bus, 0, 'peripheral', args.peer_id[:8])
+    advertisement = Advertisement(bus, 0, 'peripheral', args.peer_id, args.username, os_type)
 
     mainloop = GLib.MainLoop()
 

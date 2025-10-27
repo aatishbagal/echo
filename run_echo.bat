@@ -1,7 +1,5 @@
 @echo off
-REM Run Echo on Windows
-REM Note: Windows BLE advertising requires native implementation
-REM This script runs Echo without advertising for now
+setlocal EnableDelayedExpansion
 
 echo ================================================
 echo Echo - Bluetooth Mesh Messaging
@@ -20,15 +18,40 @@ if not exist "build\Release\echo.exe" (
     set ECHO_EXE=build\Release\echo.exe
 )
 
-echo Starting Echo...
+if not exist "echo_identity.dat" (
+    echo Generating identity...
+    timeout /t 2 /nobreak ^>nul
+    %ECHO_EXE%
+    timeout /t 1 /nobreak ^>nul
+    taskkill /f /im echo.exe ^>nul 2^>^&1
+)
+
+if not exist "echo_identity.dat" (
+    echo Error: Failed to generate identity file
+    pause
+    exit /b 1
+)
+
+echo Reading identity from echo_identity.dat...
+
+for /f "tokens=1,2 delims=|" %%a in ('python read_identity.py 2^>nul') do (
+    set USERNAME=%%a
+    set PEER_ID=%%b
+)
+
+if not defined USERNAME (
+    echo Error: Failed to read identity file
+    echo Make sure Python 3 is installed
+    pause
+    exit /b 1
+)
+
+echo   Username: !USERNAME!
+echo   Peer ID: !PEER_ID!
 echo.
+
 echo Note: Windows BLE advertising not yet implemented
 echo Echo can scan for devices but cannot advertise itself
-echo.
-echo To test Echo-to-Echo communication:
-echo 1. Run Echo on two Windows PCs or one Windows + one Linux
-echo 2. On Linux, use: ./run_echo.sh to enable advertising
-echo 3. Windows Echo will be able to see Linux Echo
 echo.
 
 %ECHO_EXE%

@@ -17,9 +17,10 @@ struct DiscoveredDevice {
     std::string name;
     int16_t rssi;
     bool isConnectable;
-    bool isEchoDevice;  // NEW: Is this an Echo/BitChat device?
-    std::string echoUsername;  // NEW: Echo username if applicable
-    std::string echoFingerprint;  // NEW: Device fingerprint
+    bool isEchoDevice; 
+    std::string echoUsername;  
+    std::string echoFingerprint;
+    std::string osType;  
     std::chrono::steady_clock::time_point lastSeen;
 };
 
