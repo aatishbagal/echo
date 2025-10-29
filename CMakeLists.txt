@@ -35,11 +35,13 @@ endif()
 # Include directories
 include_directories(src)
 
-# Source files (start minimal, expand as we build)
+# Source files
 set(SOURCES
     src/main.cpp
     src/core/bluetooth/BluetoothManager.cpp
     src/core/crypto/UserIdentity.cpp
+    src/core/protocol/MessageTypes.cpp
+    src/core/commands/IRCParser.cpp
     src/ui/ConsoleUI.cpp
 )
 
@@ -55,6 +57,7 @@ if(UNIX AND NOT APPLE)
         ${LZ4_LIBRARIES}
         OpenSSL::SSL 
         OpenSSL::Crypto
+        pthread
     )
     target_compile_options(echo PRIVATE ${LIBSODIUM_CFLAGS_OTHER})
 elseif(WIN32)
@@ -63,6 +66,15 @@ elseif(WIN32)
         OpenSSL::SSL 
         OpenSSL::Crypto
     )
+    # If using vcpkg
+    if(DEFINED VCPKG_TARGET_TRIPLET)
+        find_package(unofficial-sodium CONFIG REQUIRED)
+        find_package(lz4 CONFIG REQUIRED)
+        target_link_libraries(echo
+            unofficial-sodium::sodium
+            lz4::lz4
+        )
+    endif()
 endif()
 
 # Compiler-specific options

@@ -7,9 +7,17 @@
 #include <mutex>
 #include <chrono>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <sys/ioctl.h>
+#endif
+
 namespace echo {
 
-ConsoleUI::ConsoleUI() : running_(false) {
+ConsoleUI::ConsoleUI() 
+    : running_(false), currentChatMode_(ChatMode::NONE) {
 }
 
 ConsoleUI::~ConsoleUI() {
@@ -19,7 +27,6 @@ ConsoleUI::~ConsoleUI() {
 void ConsoleUI::run(BluetoothManager& bluetoothManager, UserIdentity& identity) {
     running_ = true;
     
-    // Set up Bluetooth event callbacks
     bluetoothManager.setDeviceDiscoveredCallback(
         [this](const DiscoveredDevice& device) {
             onDeviceDiscovered(device);
@@ -46,7 +53,6 @@ void ConsoleUI::run(BluetoothManager& bluetoothManager, UserIdentity& identity) 
     while (running_ && std::getline(std::cin, input)) {
         if (input.empty()) continue;
         
-        // Trim whitespace
         input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) {
             return !std::isspace(ch);
         }));
@@ -54,85 +60,329 @@ void ConsoleUI::run(BluetoothManager& bluetoothManager, UserIdentity& identity) 
             return !std::isspace(ch);
         }).base(), input.end());
         
-        if (input == "quit" || input == "exit") {
-            running_ = false;
-            break;
+        if (currentChatMode_ != ChatMode::NONE) {
+            handleChatMode(input, bluetoothManager, identity);
+        } else {
+            if (input == "quit" || input == "exit") {
+                running_ = false;
+                break;
+            }
+            handleCommand(input, bluetoothManager, identity);
         }
-        
-        handleCommand(input, bluetoothManager, identity);
     }
 }
 
 void ConsoleUI::printHelp() const {
     std::cout << "\n=== Echo Console Commands ===" << std::endl;
-    std::cout << "scan          - Start scanning for Echo/Bluetooth devices" << std::endl;
-    std::cout << "stop          - Stop scanning" << std::endl;
-    std::cout << "devices       - List discovered devices" << std::endl;
-    std::cout << "whoami        - Show your identity" << std::endl;
-    std::cout << "/nick <name>  - Change your username" << std::endl;
-    std::cout << "connect <addr>- Connect to device (future feature)" << std::endl;
-    std::cout << "help          - Show this help" << std::endl;
-    std::cout << "quit/exit     - Exit application" << std::endl;
+    std::cout << "scan              - Start scanning for devices" << std::endl;
+    std::cout << "stop              - Stop scanning" << std::endl;
+    std::cout << "devices           - List all discovered devices" << std::endl;
+    std::cout << "echo              - List only Echo devices" << std::endl;
+    std::cout << "/chat @username   - Start personal chat" << std::endl;
+    std::cout << "/join #global     - Join global chat" << std::endl;
+    std::cout << "/msg @user text   - Send quick message" << std::endl;
+    std::cout << "/who              - List online Echo users" << std::endl;
+    std::cout << "whoami            - Show your identity" << std::endl;
+    std::cout << "/nick <name>      - Change your username" << std::endl;
+    std::cout << "clear             - Clear screen" << std::endl;
+    std::cout << "help              - Show this help" << std::endl;
+    std::cout << "quit/exit         - Exit application" << std::endl;
     std::cout << "==============================\n" << std::endl;
-    std::cout << "echo> ";
+}
+
+void ConsoleUI::printChatHelp() const {
+    std::cout << "\n=== Chat Mode Commands ===" << std::endl;
+    std::cout << "/exit             - Exit chat mode" << std::endl;
+    std::cout << "/who              - List participants" << std::endl;
+    std::cout << "/status           - Show current chat info" << std::endl;
+    std::cout << "/help             - Show this help" << std::endl;
+    std::cout << "Type messages and press Enter to send" << std::endl;
+    std::cout << "==========================\n" << std::endl;
 }
 
 void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& bluetoothManager, UserIdentity& identity) {
-    std::istringstream iss(command);
-    std::string cmd;
-    iss >> cmd;
+    auto cmd = commandParser_.parse(command);
     
-    if (cmd == "scan") {
-        if (bluetoothManager.startScanning()) {
-            std::cout << "Started scanning for devices..." << std::endl;
+    if (!cmd.isValid && !command.empty()) {
+        std::istringstream iss(command);
+        std::string simpleCmd;
+        iss >> simpleCmd;
+        
+        if (simpleCmd == "scan") cmd.type = CommandType::SCAN;
+        else if (simpleCmd == "stop") cmd.type = CommandType::STOP;
+        else if (simpleCmd == "devices") cmd.type = CommandType::DEVICES;
+        else if (simpleCmd == "echo") cmd.type = CommandType::ECHO_DEVICES;
+        else if (simpleCmd == "whoami") cmd.type = CommandType::WHOAMI;
+        else if (simpleCmd == "help") cmd.type = CommandType::HELP;
+        else if (simpleCmd == "clear" || simpleCmd == "cls") cmd.type = CommandType::CLEAR;
+        else if (simpleCmd == "quit" || simpleCmd == "exit") cmd.type = CommandType::QUIT;
+        else {
+            std::cout << "Unknown command: " << simpleCmd << ". Type 'help' for available commands." << std::endl;
+            std::cout << getPrompt();
+            return;
+        }
+        cmd.isValid = true;
+    }
+    
+    switch (cmd.type) {
+        case CommandType::SCAN:
+            if (bluetoothManager.startScanning()) {
+                std::cout << "Started scanning for devices..." << std::endl;
+            } else {
+                std::cout << "Failed to start scanning" << std::endl;
+            }
+            break;
+            
+        case CommandType::STOP:
+            bluetoothManager.stopScanning();
+            std::cout << "Stopped scanning" << std::endl;
+            break;
+            
+        case CommandType::DEVICES:
+            printDevices(bluetoothManager);
+            break;
+            
+        case CommandType::ECHO_DEVICES:
+            printEchoDevices(bluetoothManager);
+            break;
+            
+        case CommandType::CHAT:
+            if (!cmd.target.empty()) {
+                enterPersonalChat(cmd.target, bluetoothManager);
+            } else {
+                std::cout << "Usage: /chat @username" << std::endl;
+            }
+            break;
+            
+        case CommandType::JOIN:
+            if (cmd.target.empty() || cmd.target == "#global" || cmd.target == "global") {
+                enterGlobalChat(bluetoothManager);
+            } else {
+                std::cout << "Currently only #global channel is supported" << std::endl;
+            }
+            break;
+            
+        case CommandType::MSG:
+            if (!cmd.target.empty() && !cmd.message.empty()) {
+                currentChatTarget_ = cmd.target;
+                sendMessage(cmd.message, bluetoothManager, identity);
+                displayMessage("You -> " + cmd.target, cmd.message, true);
+            } else {
+                std::cout << "Usage: /msg @username message" << std::endl;
+            }
+            break;
+            
+        case CommandType::WHO:
+            printEchoDevices(bluetoothManager);
+            break;
+            
+        case CommandType::WHOAMI:
+            std::cout << "\nYour Echo Identity:" << std::endl;
+            std::cout << "  Username: " << identity.getUsername() << std::endl;
+            std::cout << "  Fingerprint: " << identity.getFingerprint() << std::endl;
+            std::cout << std::endl;
+            break;
+            
+        case CommandType::NICK:
+            if (!cmd.target.empty()) {
+                identity.setUsername(cmd.target);
+                identity.saveToFile("echo_identity.dat");
+                std::cout << "Username changed to: " << cmd.target << std::endl;
+                std::cout << "Note: Restart Echo for the new name to be advertised" << std::endl;
+            } else {
+                std::cout << "Usage: /nick <new_username>" << std::endl;
+            }
+            break;
+            
+        case CommandType::CLEAR:
+            clearScreen();
+            break;
+            
+        case CommandType::HELP:
+            printHelp();
+            return;
+            
+        default:
+            break;
+    }
+    
+    std::cout << getPrompt();
+}
+
+void ConsoleUI::handleChatMode(const std::string& input, BluetoothManager& bluetoothManager, UserIdentity& identity) {
+    if (input == "/exit") {
+        exitChatMode();
+        return;
+    }
+    
+    if (input == "/help") {
+        printChatHelp();
+        std::cout << getPrompt();
+        return;
+    }
+    
+    if (input == "/who") {
+        if (currentChatMode_ == ChatMode::GLOBAL) {
+            printEchoDevices(bluetoothManager);
         } else {
-            std::cout << "Failed to start scanning" << std::endl;
+            std::cout << "Chatting with: " << currentChatTarget_ << std::endl;
+        }
+        std::cout << getPrompt();
+        return;
+    }
+    
+    if (input == "/status") {
+        if (currentChatMode_ == ChatMode::GLOBAL) {
+            std::cout << "In global chat (#global)" << std::endl;
+        } else {
+            std::cout << "In personal chat with: " << currentChatTarget_ << std::endl;
+        }
+        std::cout << getPrompt();
+        return;
+    }
+    
+    if (!input.empty() && input[0] != '/') {
+        sendMessage(input, bluetoothManager, identity);
+        
+        if (currentChatMode_ == ChatMode::GLOBAL) {
+            displayMessage("You", input, false);
+        } else {
+            displayMessage("You", input, true);
         }
     }
-    else if (cmd == "stop") {
-        bluetoothManager.stopScanning();
-        std::cout << "Stopped scanning" << std::endl;
+    
+    std::cout << getPrompt();
+}
+
+void ConsoleUI::enterPersonalChat(const std::string& username, BluetoothManager& bluetoothManager) {
+    auto echoDevices = bluetoothManager.getEchoDevices();
+    
+    bool found = false;
+    for (const auto& device : echoDevices) {
+        if (device.echoUsername == username) {
+            found = true;
+            break;
+        }
     }
-    else if (cmd == "devices") {
-        printDevices(bluetoothManager);
+    
+    if (!found) {
+        std::cout << "User '" << username << "' not found. Run 'echo' to see online users." << std::endl;
+        std::cout << getPrompt();
+        return;
     }
-    else if (cmd == "whoami") {
-        std::cout << "\nYour Echo Identity:" << std::endl;
-        std::cout << "  Username: " << identity.getUsername() << std::endl;
-        std::cout << "  Fingerprint: " << identity.getFingerprint() << std::endl;
+    
+    currentChatMode_ = ChatMode::PERSONAL;
+    currentChatTarget_ = username;
+    
+    clearScreen();
+    std::cout << "=== Personal Chat with " << username << " ===" << std::endl;
+    std::cout << "Type /exit to leave chat, /help for commands" << std::endl;
+    std::cout << std::string(40, '-') << std::endl;
+    
+    std::cout << getPrompt();
+}
+
+void ConsoleUI::enterGlobalChat(BluetoothManager& bluetoothManager) {
+    currentChatMode_ = ChatMode::GLOBAL;
+    currentChatTarget_ = "#global";
+    
+    clearScreen();
+    std::cout << "=== Global Chat (#global) ===" << std::endl;
+    std::cout << "Broadcasting to all Echo devices in range" << std::endl;
+    std::cout << "Type /exit to leave chat, /help for commands" << std::endl;
+    std::cout << std::string(40, '-') << std::endl;
+    
+    auto echoDevices = bluetoothManager.getEchoDevices();
+    if (!echoDevices.empty()) {
+        std::cout << "Online users: ";
+        for (size_t i = 0; i < echoDevices.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << echoDevices[i].echoUsername;
+        }
         std::cout << std::endl;
     }
-    else if (cmd == "/nick") {
-        std::string newUsername;
-        iss >> newUsername;
-        if (newUsername.empty()) {
-            std::cout << "Usage: /nick <new_username>" << std::endl;
-        } else {
-            identity.setUsername(newUsername);
-            identity.saveToFile("echo_identity.dat");
-            std::cout << "Username changed to: " << newUsername << std::endl;
-            std::cout << "Note: Restart Echo for the new name to be advertised" << std::endl;
+    std::cout << std::string(40, '-') << std::endl;
+    
+    std::cout << getPrompt();
+}
+
+void ConsoleUI::exitChatMode() {
+    std::cout << "Exiting chat mode..." << std::endl;
+    currentChatMode_ = ChatMode::NONE;
+    currentChatTarget_.clear();
+    std::cout << getPrompt();
+}
+
+void ConsoleUI::sendMessage(const std::string& message, BluetoothManager& bluetoothManager, UserIdentity& identity) {
+    bool isGlobal = (currentChatMode_ == ChatMode::GLOBAL);
+    
+    auto msg = MessageFactory::createTextMessage(
+        message,
+        identity.getUsername(),
+        identity.getFingerprint(),
+        currentChatTarget_,
+        isGlobal
+    );
+    
+    auto data = msg.serialize();
+    
+    if (isGlobal) {
+        auto devices = bluetoothManager.getEchoDevices();
+        for (const auto& device : devices) {
+            bluetoothManager.sendData(device.address, data);
+        }
+    } else {
+        auto targetAddress = findAddressByUsername(currentChatTarget_, bluetoothManager);
+        if (!targetAddress.empty()) {
+            bluetoothManager.sendData(targetAddress, data);
         }
     }
-    else if (cmd == "connect") {
-        std::string address;
-        iss >> address;
-        if (address.empty()) {
-            std::cout << "Usage: connect <device_address>" << std::endl;
-        } else {
-            std::cout << "Note: Echo uses mesh networking - connections not required for messaging" << std::endl;
-            std::cout << "Direct connections will be implemented for file transfers" << std::endl;
-        }
-    }
-    else if (cmd == "help") {
-        printHelp();
-        return; // Don't print prompt twice
-    }
-    else {
-        std::cout << "Unknown command: " << cmd << ". Type 'help' for available commands." << std::endl;
+}
+
+void ConsoleUI::displayMessage(const std::string& from, const std::string& message, bool isPrivate) {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm = *std::localtime(&time_t);
+    
+    std::cout << std::endl;
+    std::cout << "[" << std::put_time(&tm, "%H:%M:%S") << "] ";
+    
+    if (isPrivate) {
+        std::cout << "[DM] ";
+    } else {
+        std::cout << "[#global] ";
     }
     
-    std::cout << "echo> ";
+    std::cout << from << ": " << message << std::endl;
+    
+    addToHistory(from + ": " + message);
+}
+
+void ConsoleUI::addToHistory(const std::string& message) {
+    std::lock_guard<std::mutex> lock(historyMutex_);
+    messageHistory_.push_back(message);
+    
+    if (messageHistory_.size() > MAX_HISTORY) {
+        messageHistory_.pop_front();
+    }
+}
+
+void ConsoleUI::clearScreen() const {
+#ifdef _WIN32
+    system("cls");
+#else
+    system("clear");
+#endif
+}
+
+std::string ConsoleUI::getPrompt() const {
+    if (currentChatMode_ == ChatMode::GLOBAL) {
+        return "[#global]> ";
+    } else if (currentChatMode_ == ChatMode::PERSONAL) {
+        return "[" + currentChatTarget_ + "]> ";
+    } else {
+        return "echo> ";
+    }
 }
 
 void ConsoleUI::printDevices(const BluetoothManager& bluetoothManager) const {
@@ -143,7 +393,6 @@ void ConsoleUI::printDevices(const BluetoothManager& bluetoothManager) const {
         return;
     }
     
-    // Separate Echo devices from regular BT devices
     std::vector<const DiscoveredDevice*> echoDevices;
     std::vector<const DiscoveredDevice*> regularDevices;
     
@@ -155,7 +404,6 @@ void ConsoleUI::printDevices(const BluetoothManager& bluetoothManager) const {
         }
     }
     
-    // Show Echo devices first
     if (!echoDevices.empty()) {
         std::cout << "\n=== Echo Network Devices ===" << std::endl;
         std::cout << std::left << std::setw(20) << "Username" 
@@ -177,10 +425,8 @@ void ConsoleUI::printDevices(const BluetoothManager& bluetoothManager) const {
                       << std::setw(8) << device->rssi
                       << elapsed << "s ago" << std::endl;
         }
-        std::cout << "==========================\n" << std::endl;
     }
     
-    // Show regular Bluetooth devices
     if (!regularDevices.empty()) {
         std::cout << "\n=== Other Bluetooth Devices ===" << std::endl;
         std::cout << std::left << std::setw(20) << "Name" 
@@ -198,49 +444,127 @@ void ConsoleUI::printDevices(const BluetoothManager& bluetoothManager) const {
                       << std::setw(8) << device->rssi
                       << elapsed << "s ago" << std::endl;
         }
-        std::cout << "==============================\n" << std::endl;
     }
+    
+    std::cout << std::endl;
+}
+
+void ConsoleUI::printEchoDevices(const BluetoothManager& bluetoothManager) const {
+    auto devices = bluetoothManager.getEchoDevices();
+    
+    if (devices.empty()) {
+        std::cout << "No Echo devices found. Run 'scan' to search." << std::endl;
+        return;
+    }
+    
+    std::cout << "\n=== Online Echo Users ===" << std::endl;
+    std::cout << std::left << std::setw(20) << "Username" 
+              << std::setw(10) << "OS"
+              << std::setw(8) << "Signal"
+              << "Status" << std::endl;
+    std::cout << std::string(50, '-') << std::endl;
+    
+    for (const auto& device : devices) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - device.lastSeen).count();
+        
+        std::string status = elapsed < 10 ? "Active" : 
+                           elapsed < 30 ? "Online" : "Away";
+        
+        std::string signal = std::to_string(device.rssi) + " dBm";
+        
+        std::cout << std::left << std::setw(20) << device.echoUsername
+                  << std::setw(10) << device.osType
+                  << std::setw(8) << signal
+                  << status << std::endl;
+    }
+    
+    std::cout << "\nTotal: " << devices.size() << " Echo user(s) online" << std::endl;
+    std::cout << std::endl;
 }
 
 void ConsoleUI::onDeviceDiscovered(const DiscoveredDevice& device) {
-    if (device.isEchoDevice) {
-        std::cout << "\n[ECHO DEVICE] " << device.echoUsername 
-                  << " [" << device.echoFingerprint.substr(0, 8) << "...] "
-                  << "(" << device.address << ") "
-                  << "RSSI: " << device.rssi << " dBm" << std::endl;
-    } else {
-        std::cout << "\n[BLUETOOTH] " << device.name << " (" << device.address << ") "
-                  << "RSSI: " << device.rssi << " dBm" << std::endl;
+    if (currentChatMode_ != ChatMode::NONE) {
+        return;
     }
-    std::cout << "echo> ";
+    
+    if (device.isEchoDevice) {
+        std::cout << "\n[ECHO USER ONLINE] " << device.echoUsername 
+                  << " (" << device.osType << ") "
+                  << "Signal: " << device.rssi << " dBm" << std::endl;
+    }
+    std::cout << getPrompt();
     std::cout.flush();
 }
 
 void ConsoleUI::onDeviceConnected(const std::string& address) {
-    std::cout << "\n[CONNECTED] Device " << address << " connected successfully" << std::endl;
-    std::cout << "echo> ";
+    std::cout << "\n[CONNECTED] Device " << address << " connected" << std::endl;
+    std::cout << getPrompt();
     std::cout.flush();
 }
 
 void ConsoleUI::onDeviceDisconnected(const std::string& address) {
     std::cout << "\n[DISCONNECTED] Device " << address << " disconnected" << std::endl;
-    std::cout << "echo> ";
+    std::cout << getPrompt();
     std::cout.flush();
 }
 
 void ConsoleUI::onDataReceived(const std::string& address, const std::vector<uint8_t>& data) {
-    std::cout << "\n[DATA] Received " << data.size() << " bytes from " << address << ": ";
-    
-    // Print data as hex for now
-    for (size_t i = 0; i < std::min(data.size(), size_t(16)); ++i) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i]) << " ";
+    try {
+        auto msg = Message::deserialize(data);
+        processReceivedMessage(msg, address);
+    } catch (const std::exception& e) {
+        if (currentChatMode_ == ChatMode::NONE) {
+            std::cout << "\n[DATA] Received " << data.size() << " bytes from " << address << std::endl;
+            std::cout << getPrompt();
+            std::cout.flush();
+        }
     }
-    if (data.size() > 16) {
-        std::cout << "...";
+}
+
+void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& sourceAddress) {
+    if (msg.header.type == MessageType::TEXT_MESSAGE || 
+        msg.header.type == MessageType::GLOBAL_MESSAGE ||
+        msg.header.type == MessageType::PRIVATE_MESSAGE) {
+        
+        auto textMsg = TextMessage::deserialize(msg.payload);
+        
+        if (textMsg.isGlobal && currentChatMode_ == ChatMode::GLOBAL) {
+            displayMessage(textMsg.senderUsername, textMsg.content, false);
+            std::cout << getPrompt();
+            std::cout.flush();
+        } else if (!textMsg.isGlobal) {
+            if (currentChatMode_ == ChatMode::PERSONAL && 
+                currentChatTarget_ == textMsg.senderUsername) {
+                displayMessage(textMsg.senderUsername, textMsg.content, true);
+            } else {
+                std::cout << "\n[NEW MESSAGE from " << textMsg.senderUsername << "]: " 
+                         << textMsg.content << std::endl;
+            }
+            std::cout << getPrompt();
+            std::cout.flush();
+        }
     }
-    std::cout << std::dec << std::endl;
-    std::cout << "echo> ";
-    std::cout.flush();
+}
+
+std::string ConsoleUI::findUsernameByAddress(const std::string& address, const BluetoothManager& bluetoothManager) const {
+    auto devices = bluetoothManager.getEchoDevices();
+    for (const auto& device : devices) {
+        if (device.address == address) {
+            return device.echoUsername;
+        }
+    }
+    return "";
+}
+
+std::string ConsoleUI::findAddressByUsername(const std::string& username, const BluetoothManager& bluetoothManager) const {
+    auto devices = bluetoothManager.getEchoDevices();
+    for (const auto& device : devices) {
+        if (device.echoUsername == username) {
+            return device.address;
+        }
+    }
+    return "";
 }
 
 } // namespace echo
