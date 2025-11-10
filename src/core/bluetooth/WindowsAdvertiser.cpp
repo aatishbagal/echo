@@ -107,9 +107,11 @@ public:
             
             auto advertisement = publisher_.Advertisement();
             
-            // Set local name
             try {
-                std::string advertisingName = "Echo-" + username + "[windows]";
+                std::string advertisingName = "Echo-" + username;
+                if (advertisingName.length() > 8) {
+                    advertisingName = advertisingName.substr(0, 8);
+                }
                 advertisement.LocalName(winrt::to_hstring(advertisingName));
                 std::cout << "[Windows Advertiser] Set local name: " << advertisingName << std::endl;
             } catch (const winrt::hresult_error& e) {
@@ -117,12 +119,9 @@ public:
                           << std::hex << e.code() << std::dec << ")" << std::endl;
             }
             
-            // Add service UUID using CBUUID string format
             try {
-                // Try using the string-based UUID approach instead of GUID
                 auto serviceUuids = advertisement.ServiceUuids();
                 
-                // Windows expects GUIDs in standard format
                 winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A, 
                     { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
                 
@@ -132,18 +131,14 @@ public:
                 std::cerr << "[Windows Advertiser] Error adding service UUID (HRESULT: 0x" 
                           << std::hex << e.code() << std::dec << "): " 
                           << winrt::to_string(e.message()) << std::endl;
-                // Service UUID is critical - re-throw
                 throw;
             }
             
-            // IMPORTANT: Don't set status callback before Start() - it can cause E_INVALIDARG
-            // Set publisher status callback AFTER starting
             auto statusToken = publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
                                            BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
                 onStatusChanged(sender, args);
             });
             
-            // Start advertising
             std::cout << "[Windows Advertiser] Starting publisher..." << std::endl;
             
             try {
@@ -153,22 +148,15 @@ public:
                           << std::hex << e.code() << std::dec << std::endl;
                 std::cerr << "[Windows Advertiser] Error: " << winrt::to_string(e.message()) << std::endl;
                 
-                // Try to get more detailed error
-                if (e.code() == 0x80070057) {  // E_INVALIDARG
-                    std::cerr << "[Windows Advertiser] E_INVALIDARG - Possible causes:" << std::endl;
-                    std::cerr << "  - Bluetooth is disabled or unavailable" << std::endl;
-                    std::cerr << "  - Another app is already advertising" << std::endl;
-                    std::cerr << "  - Windows Bluetooth LE Peripheral mode not supported" << std::endl;
-                    std::cerr << "  - Check: Settings > Bluetooth & devices > Bluetooth is ON" << std::endl;
+                if (e.code() == 0x80070057) {
+                    std::cerr << "[Windows Advertiser] E_INVALIDARG - Advertisement payload exceeds 31 bytes" << std::endl;
                 }
                 throw;
             }
             
-            // Give it a moment to start
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             
             std::cout << "[Windows Advertiser] Successfully started advertising" << std::endl;
-            std::cout << "[Windows Advertiser] Broadcasting as: Echo-" << username << "[windows]" << std::endl;
             std::cout << "[Windows Advertiser] Service UUID: " << ECHO_SERVICE_UUID << std::endl;
             
             return true;
