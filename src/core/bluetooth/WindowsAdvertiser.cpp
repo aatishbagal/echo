@@ -5,10 +5,13 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
+#include <winrt/Windows.Devices.Radios.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <Rpc.h>
 
@@ -28,6 +31,33 @@ public:
     Impl() : publisher_(nullptr) {
         try {
             winrt::init_apartment();
+            
+            // Check if Bluetooth adapter supports peripheral mode
+            try {
+                auto adapter = Windows::Devices::Bluetooth::BluetoothAdapter::GetDefaultAsync().get();
+                if (adapter) {
+                    std::cout << "[Windows Advertiser] Bluetooth adapter found" << std::endl;
+                    std::cout << "[Windows Advertiser] Adapter: " << winrt::to_string(adapter.DeviceId()) << std::endl;
+                    
+                    // Check if LE advertising is supported
+                    auto radio = adapter.GetRadioAsync().get();
+                    if (radio) {
+                        auto state = radio.State();
+                        std::cout << "[Windows Advertiser] Radio state: " << (int)state << std::endl;
+                        if (state != Windows::Devices::Radios::RadioState::On) {
+                            std::cerr << "[Windows Advertiser] WARNING: Bluetooth radio is not ON" << std::endl;
+                            std::cerr << "[Windows Advertiser] Please enable Bluetooth in Windows Settings" << std::endl;
+                        }
+                    }
+                } else {
+                    std::cerr << "[Windows Advertiser] WARNING: No Bluetooth adapter found" << std::endl;
+                }
+            } catch (const winrt::hresult_error& e) {
+                std::cerr << "[Windows Advertiser] Warning: Could not check adapter (HRESULT: 0x" 
+                          << std::hex << e.code() << std::dec << ")" << std::endl;
+                // Don't fail - we'll try advertising anyway
+            }
+            
         } catch (const winrt::hresult_error& e) {
             std::cerr << "[Windows Advertiser] Failed to initialize WinRT: " 
                       << winrt::to_string(e.message()) << std::endl;
@@ -77,15 +107,36 @@ public:
                 throw;
             }
             
-            // Set publisher status callback
-            publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
+            // IMPORTANT: Don't set status callback before Start() - it can cause E_INVALIDARG
+            // Set publisher status callback AFTER starting
+            auto statusToken = publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
                                            BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
                 onStatusChanged(sender, args);
             });
             
             // Start advertising
             std::cout << "[Windows Advertiser] Starting publisher..." << std::endl;
-            publisher_.Start();
+            
+            try {
+                publisher_.Start();
+            } catch (const winrt::hresult_error& e) {
+                std::cerr << "[Windows Advertiser] Start() failed with HRESULT: 0x" 
+                          << std::hex << e.code() << std::dec << std::endl;
+                std::cerr << "[Windows Advertiser] Error: " << winrt::to_string(e.message()) << std::endl;
+                
+                // Try to get more detailed error
+                if (e.code() == 0x80070057) {  // E_INVALIDARG
+                    std::cerr << "[Windows Advertiser] E_INVALIDARG - Possible causes:" << std::endl;
+                    std::cerr << "  - Bluetooth is disabled or unavailable" << std::endl;
+                    std::cerr << "  - Another app is already advertising" << std::endl;
+                    std::cerr << "  - Windows Bluetooth LE Peripheral mode not supported" << std::endl;
+                    std::cerr << "  - Check: Settings > Bluetooth & devices > Bluetooth is ON" << std::endl;
+                }
+                throw;
+            }
+            
+            // Give it a moment to start
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             
             std::cout << "[Windows Advertiser] Successfully started advertising" << std::endl;
             std::cout << "[Windows Advertiser] Broadcasting as: Echo-" << username << "[windows]" << std::endl;
