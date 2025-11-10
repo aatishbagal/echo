@@ -108,9 +108,9 @@ public:
             auto advertisement = publisher_.Advertisement();
             
             try {
-                std::string advertisingName = "Echo-" + username;
-                if (advertisingName.length() > 8) {
-                    advertisingName = advertisingName.substr(0, 8);
+                std::string advertisingName = "E-" + username;
+                if (advertisingName.length() > 4) {
+                    advertisingName = advertisingName.substr(0, 4);
                 }
                 advertisement.LocalName(winrt::to_hstring(advertisingName));
                 std::cout << "[Windows Advertiser] Set local name: " << advertisingName << std::endl;
@@ -134,11 +134,6 @@ public:
                 throw;
             }
             
-            auto statusToken = publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
-                                           BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
-                onStatusChanged(sender, args);
-            });
-            
             std::cout << "[Windows Advertiser] Starting publisher..." << std::endl;
             
             try {
@@ -153,6 +148,11 @@ public:
                 }
                 throw;
             }
+            
+            auto statusToken = publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
+                                           BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
+                onStatusChanged(sender, args);
+            });
             
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             
