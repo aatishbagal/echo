@@ -4,6 +4,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
@@ -14,6 +15,7 @@
 #pragma comment(lib, "Rpcrt4.lib")
 
 using namespace winrt;
+using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
 using namespace Windows::Devices::Bluetooth;
 using namespace Windows::Devices::Bluetooth::Advertisement;
@@ -47,25 +49,37 @@ public:
             auto advertisement = publisher_.Advertisement();
             advertisement.LocalName(winrt::to_hstring("Echo-" + username + "[windows]"));
             
-            BluetoothLEManufacturerData manufacturerData;
-            manufacturerData.CompanyId(0xFFFF);
-            
-            std::vector<uint8_t> data;
-            data.push_back(0x01);
-            
-            std::string peerIdShort = fingerprint.substr(0, 16);
-            data.insert(data.end(), peerIdShort.begin(), peerIdShort.end());
-            
-            DataWriter writer;
-            writer.WriteBytes(data);
-            manufacturerData.Data(writer.DetachBuffer());
-            
-            advertisement.ManufacturerData().Append(manufacturerData);
-            
+            // Add service UUID (most important for discovery)
             winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A, 
                 { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
             
             advertisement.ServiceUuids().Append(serviceGuid);
+            
+            // Try to add manufacturer data (optional)
+            try {
+                std::string peerIdShort = fingerprint.substr(0, std::min(size_t(16), fingerprint.length()));
+                
+                // Create data buffer
+                std::vector<uint8_t> dataVec;
+                dataVec.push_back(0x01);  // Version byte
+                dataVec.insert(dataVec.end(), peerIdShort.begin(), peerIdShort.end());
+                
+                // Create WinRT buffer
+                Windows::Storage::Streams::Buffer buffer(static_cast<uint32_t>(dataVec.size()));
+                uint8_t* rawBuffer = buffer.data();
+                std::copy(dataVec.begin(), dataVec.end(), rawBuffer);
+                buffer.Length(static_cast<uint32_t>(dataVec.size()));
+                
+                BluetoothLEManufacturerData manufacturerData;
+                manufacturerData.CompanyId(0xFFFF);  // Test/Development company ID
+                manufacturerData.Data(buffer);
+                
+                advertisement.ManufacturerData().Append(manufacturerData);
+            } catch (const winrt::hresult_error& e) {
+                std::cerr << "[Windows Advertiser] Warning: Could not add manufacturer data (HRESULT: 0x" 
+                          << std::hex << e.code() << std::dec << ")" << std::endl;
+                // Continue - manufacturer data is optional for basic advertising
+            }
             
             publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
                                            BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
@@ -76,7 +90,6 @@ public:
             
             std::cout << "[Windows Advertiser] Started advertising as: Echo-" << username << "[windows]" << std::endl;
             std::cout << "[Windows Advertiser] Service UUID: " << ECHO_SERVICE_UUID << std::endl;
-            std::cout << "[Windows Advertiser] Peer ID: " << peerIdShort << std::endl;
             
             return true;
             
