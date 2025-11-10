@@ -10,6 +10,14 @@
 #include <mutex>
 #include <chrono>
 
+#ifdef _WIN32
+#include "WindowsAdvertiser.h"
+#endif
+
+#ifdef __linux__
+#include "BluezAdvertiser.h"
+#endif
+
 namespace echo {
 
 struct DiscoveredDevice {
@@ -45,6 +53,11 @@ public:
     bool startBitChatAdvertising();
     void stopBitChatAdvertising();
     
+    // Echo advertising operations
+    bool startEchoAdvertising(const std::string& username, const std::string& fingerprint);
+    void stopEchoAdvertising();
+    bool isAdvertising() const;
+    
     // Callbacks for device events
     using DeviceDiscoveredCallback = std::function<void(const DiscoveredDevice&)>;
     using DeviceConnectedCallback = std::function<void(const std::string& address)>;
@@ -79,6 +92,14 @@ private:
     // State
     std::atomic<bool> isScanning_;
     std::atomic<bool> isAdvertising_;
+    
+    // Platform-specific advertisers
+#ifdef _WIN32
+    std::unique_ptr<WindowsAdvertiser> windowsAdvertiser_;
+#endif
+#ifdef __linux__
+    std::unique_ptr<BluezAdvertiser> bluezAdvertiser_;
+#endif
     
     // BitChat specific UUIDs (from actual BitChat implementation)
     static constexpr const char* BITCHAT_SERVICE_UUID = "F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C";

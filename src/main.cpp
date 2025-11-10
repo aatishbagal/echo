@@ -58,6 +58,15 @@ int main(int argc, char* argv[]) {
         
         std::cout << "Bluetooth initialized successfully" << std::endl;
         
+        // Start advertising Echo presence
+        std::cout << "\nStarting Echo advertising..." << std::endl;
+        if (bluetoothManager->startEchoAdvertising(identity.getUsername(), identity.getFingerprint())) {
+            std::cout << "Now visible to other Echo devices" << std::endl;
+        } else {
+            std::cout << "Warning: Could not start advertising (scanning will still work)" << std::endl;
+        }
+        std::cout << std::endl;
+        
         // Start the application main loop
         consoleUI->run(*bluetoothManager, identity);
         

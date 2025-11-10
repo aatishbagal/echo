@@ -45,6 +45,29 @@ set(SOURCES
     src/ui/ConsoleUI.cpp
 )
 
+if(WIN32)
+    list(APPEND SOURCES
+        src/core/bluetooth/WindowsAdvertiser.cpp
+    )
+    
+    # Add WinRT support for Windows
+    target_link_libraries(echo PRIVATE
+        windowsapp
+    )
+    
+    # Enable C++/WinRT
+    set_target_properties(echo PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+    )
+endif()
+
+if(UNIX AND NOT APPLE)
+    list(APPEND SOURCES
+        src/core/bluetooth/BluezAdvertiser.cpp
+    )
+endif()
+
 # Create executable
 add_executable(echo ${SOURCES})
 

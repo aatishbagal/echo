@@ -9,6 +9,13 @@ namespace echo {
 BluetoothManager::BluetoothManager() 
     : isScanning_(false), isAdvertising_(false) {
     initializeAdapter();
+    
+#ifdef _WIN32
+    windowsAdvertiser_ = std::make_unique<WindowsAdvertiser>();
+#endif
+#ifdef __linux__
+    bluezAdvertiser_ = std::make_unique<BluezAdvertiser>();
+#endif
 }
 
 BluetoothManager::~BluetoothManager() {
@@ -296,14 +303,71 @@ SimpleBLE::Peripheral* BluetoothManager::findConnectedPeripheral(const std::stri
 }
 
 bool BluetoothManager::startBitChatAdvertising() {
-    // TODO: Implement BLE advertising to announce this device as BitChat compatible
-    // This will require platform-specific implementation or SimpleBLE peripheral mode
-    std::cout << "BitChat advertising not yet implemented" << std::endl;
+    std::cout << "[DEPRECATED] Use startEchoAdvertising() instead" << std::endl;
     return false;
 }
 
 void BluetoothManager::stopBitChatAdvertising() {
+    stopEchoAdvertising();
+}
+
+bool BluetoothManager::startEchoAdvertising(const std::string& username, const std::string& fingerprint) {
+    if (isAdvertising_) {
+        std::cout << "Already advertising" << std::endl;
+        return true;
+    }
+    
+    bool success = false;
+    
+#ifdef _WIN32
+    if (windowsAdvertiser_) {
+        success = windowsAdvertiser_->startAdvertising(username, fingerprint);
+    } else {
+        std::cerr << "Windows advertiser not initialized" << std::endl;
+    }
+#endif
+
+#ifdef __linux__
+    if (bluezAdvertiser_) {
+        success = bluezAdvertiser_->startAdvertising(username, fingerprint);
+    } else {
+        std::cerr << "BlueZ advertiser not initialized" << std::endl;
+    }
+#endif
+
+    if (success) {
+        isAdvertising_ = true;
+        std::cout << "Echo advertising started successfully" << std::endl;
+    } else {
+        std::cout << "Failed to start Echo advertising" << std::endl;
+    }
+    
+    return success;
+}
+
+void BluetoothManager::stopEchoAdvertising() {
+    if (!isAdvertising_) {
+        return;
+    }
+    
+#ifdef _WIN32
+    if (windowsAdvertiser_) {
+        windowsAdvertiser_->stopAdvertising();
+    }
+#endif
+
+#ifdef __linux__
+    if (bluezAdvertiser_) {
+        bluezAdvertiser_->stopAdvertising();
+    }
+#endif
+
     isAdvertising_ = false;
+    std::cout << "Echo advertising stopped" << std::endl;
+}
+
+bool BluetoothManager::isAdvertising() const {
+    return isAdvertising_;
 }
 
 bool BluetoothManager::sendData(const std::string& address, const std::vector<uint8_t>& data) {
