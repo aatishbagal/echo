@@ -211,10 +211,10 @@ echo> devices
 ## Current Workaround
 
 For now, Echo can:
-- ✅ Scan for BitChat devices
-- ✅ Display BitChat usernames/fingerprints
-- ✅ Parse BitChat protocol messages (when implemented)
-- ❌ Cannot advertise itself
-- ❌ Cannot relay messages (needs advertising)
+- Scan for BitChat devices
+- Display BitChat usernames/fingerprints
+- Parse BitChat protocol messages (when implemented)
+- Cannot advertise itself
+- Cannot relay messages (needs advertising)
 
 To test if scanning works, try finding **any** BLE device first (fitness tracker, smart watch, etc.) to verify SimpleBLE is working correctly.

@@ -50,10 +50,6 @@ echo   Username: !USERNAME!
 echo   Peer ID: !PEER_ID!
 echo.
 
-echo Note: Windows BLE advertising not yet implemented
-echo Echo can scan for devices but cannot advertise itself
-echo.
-
 %ECHO_EXE%
 
 echo.

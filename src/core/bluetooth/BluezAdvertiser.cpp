@@ -225,6 +225,6 @@ void BluezAdvertiser::setAdvertisingInterval(uint16_t minInterval, uint16_t maxI
     (void)maxInterval;
 }
 
-} // namespace echo
+}
 
-#endif // __linux__
+#endif 

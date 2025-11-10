@@ -8,6 +8,9 @@
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
 #include <winrt/Windows.Storage.Streams.h>
+#include <Rpc.h>
+
+#pragma comment(lib, "Rpcrt4.lib")
 
 using namespace winrt;
 using namespace Windows::Devices::Bluetooth;
@@ -19,7 +22,16 @@ namespace echo {
 class WindowsAdvertiser::Impl {
 public:
     Impl() : publisher_(nullptr) {
-        init_apartment();
+        try {
+            winrt::init_apartment();
+        } catch (const winrt::hresult_error& e) {
+            std::cerr << "[Windows Advertiser] Failed to initialize WinRT: " 
+                      << winrt::to_string(e.message()) << std::endl;
+            throw;
+        } catch (...) {
+            std::cerr << "[Windows Advertiser] Failed to initialize WinRT" << std::endl;
+            throw;
+        }
     }
     
     ~Impl() {
@@ -48,8 +60,8 @@ public:
             
             advertisement.ManufacturerData().Append(manufacturerData);
             
-            GUID serviceGuid;
-            UuidFromStringA((RPC_CSTR)ECHO_SERVICE_UUID, &serviceGuid);
+            winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A, 
+                { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
             
             advertisement.ServiceUuids().Append(serviceGuid);
             
@@ -66,6 +78,10 @@ public:
             
             return true;
             
+        } catch (const winrt::hresult_error& e) {
+            std::cerr << "[Windows Advertiser] WinRT Error: " << winrt::to_string(e.message()) << std::endl;
+            std::cerr << "[Windows Advertiser] HRESULT: 0x" << std::hex << e.code() << std::dec << std::endl;
+            return false;
         } catch (const std::exception& e) {
             std::cerr << "[Windows Advertiser] Failed to start: " << e.what() << std::endl;
             return false;
@@ -80,6 +96,8 @@ public:
             try {
                 publisher_.Stop();
                 std::cout << "[Windows Advertiser] Stopped advertising" << std::endl;
+            } catch (const winrt::hresult_error& e) {
+                std::cerr << "[Windows Advertiser] Error stopping: " << winrt::to_string(e.message()) << std::endl;
             } catch (...) {
                 std::cerr << "[Windows Advertiser] Error stopping advertising" << std::endl;
             }

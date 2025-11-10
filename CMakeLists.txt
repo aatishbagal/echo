@@ -49,17 +49,6 @@ if(WIN32)
     list(APPEND SOURCES
         src/core/bluetooth/WindowsAdvertiser.cpp
     )
-    
-    # Add WinRT support for Windows
-    target_link_libraries(echo PRIVATE
-        windowsapp
-    )
-    
-    # Enable C++/WinRT
-    set_target_properties(echo PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-    )
 endif()
 
 if(UNIX AND NOT APPLE)
@@ -68,10 +57,8 @@ if(UNIX AND NOT APPLE)
     )
 endif()
 
-# Create executable
 add_executable(echo ${SOURCES})
 
-# Link libraries
 target_link_libraries(echo ${SIMPLEBLE_TARGET})
 
 if(UNIX AND NOT APPLE)
@@ -84,12 +71,12 @@ if(UNIX AND NOT APPLE)
     )
     target_compile_options(echo PRIVATE ${LIBSODIUM_CFLAGS_OTHER})
 elseif(WIN32)
-    # Windows libraries will be added via vcpkg
     target_link_libraries(echo
         OpenSSL::SSL 
         OpenSSL::Crypto
+        windowsapp
     )
-    # If using vcpkg
+    
     if(DEFINED VCPKG_TARGET_TRIPLET)
         find_package(unofficial-sodium CONFIG REQUIRED)
         find_package(lz4 CONFIG REQUIRED)
@@ -100,9 +87,8 @@ elseif(WIN32)
     endif()
 endif()
 
-# Compiler-specific options
 if(MSVC)
-    target_compile_options(echo PRIVATE /W4)
+    target_compile_options(echo PRIVATE /W4 /await)
 else()
     target_compile_options(echo PRIVATE -Wall -Wextra -Wpedantic)
 endif()
