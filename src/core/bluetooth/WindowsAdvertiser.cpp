@@ -43,12 +43,41 @@ public:
                     auto radio = adapter.GetRadioAsync().get();
                     if (radio) {
                         auto state = radio.State();
-                        std::cout << "[Windows Advertiser] Radio state: " << (int)state << std::endl;
+                        std::cout << "[Windows Advertiser] Radio state: " << (int)state << " (";
+                        switch (state) {
+                            case Windows::Devices::Radios::RadioState::Unknown:
+                                std::cout << "Unknown"; break;
+                            case Windows::Devices::Radios::RadioState::On:
+                                std::cout << "ON"; break;
+                            case Windows::Devices::Radios::RadioState::Off:
+                                std::cout << "OFF"; break;
+                            case Windows::Devices::Radios::RadioState::Disabled:
+                                std::cout << "Disabled"; break;
+                        }
+                        std::cout << ")" << std::endl;
+                        
                         if (state != Windows::Devices::Radios::RadioState::On) {
-                            std::cerr << "[Windows Advertiser] WARNING: Bluetooth radio is not ON" << std::endl;
-                            std::cerr << "[Windows Advertiser] Please enable Bluetooth in Windows Settings" << std::endl;
+                            std::cerr << "\n[Windows Advertiser] ERROR: Bluetooth radio is NOT enabled!" << std::endl;
+                            std::cerr << "[Windows Advertiser] To fix this:" << std::endl;
+                            std::cerr << "  1. Open Windows Settings" << std::endl;
+                            std::cerr << "  2. Go to Bluetooth & devices" << std::endl;
+                            std::cerr << "  3. Turn ON the Bluetooth toggle" << std::endl;
+                            std::cerr << "  4. Restart Echo\n" << std::endl;
                         }
                     }
+                    
+                    // Check if peripheral mode is supported
+                    std::cout << "[Windows Advertiser] Checking peripheral mode support..." << std::endl;
+                    auto leFeatures = adapter.IsPeripheralRoleSupported();
+                    std::cout << "[Windows Advertiser] Peripheral role supported: " 
+                              << (leFeatures ? "YES" : "NO") << std::endl;
+                    
+                    if (!leFeatures) {
+                        std::cerr << "\n[Windows Advertiser] WARNING: BLE Peripheral mode NOT supported!" << std::endl;
+                        std::cerr << "[Windows Advertiser] This Windows device cannot advertise BLE services." << std::endl;
+                        std::cerr << "[Windows Advertiser] Scanning for other devices will still work.\n" << std::endl;
+                    }
+                    
                 } else {
                     std::cerr << "[Windows Advertiser] WARNING: No Bluetooth adapter found" << std::endl;
                 }
