@@ -47,48 +47,48 @@ public:
             publisher_ = BluetoothLEAdvertisementPublisher();
             
             auto advertisement = publisher_.Advertisement();
-            advertisement.LocalName(winrt::to_hstring("Echo-" + username + "[windows]"));
             
-            // Add service UUID (most important for discovery)
-            winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A, 
-                { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
-            
-            advertisement.ServiceUuids().Append(serviceGuid);
-            
-            // Try to add manufacturer data (optional)
+            // Set local name
             try {
-                std::string peerIdShort = fingerprint.substr(0, std::min(size_t(16), fingerprint.length()));
-                
-                // Create data buffer
-                std::vector<uint8_t> dataVec;
-                dataVec.push_back(0x01);  // Version byte
-                dataVec.insert(dataVec.end(), peerIdShort.begin(), peerIdShort.end());
-                
-                // Create WinRT buffer
-                Windows::Storage::Streams::Buffer buffer(static_cast<uint32_t>(dataVec.size()));
-                uint8_t* rawBuffer = buffer.data();
-                std::copy(dataVec.begin(), dataVec.end(), rawBuffer);
-                buffer.Length(static_cast<uint32_t>(dataVec.size()));
-                
-                BluetoothLEManufacturerData manufacturerData;
-                manufacturerData.CompanyId(0xFFFF);  // Test/Development company ID
-                manufacturerData.Data(buffer);
-                
-                advertisement.ManufacturerData().Append(manufacturerData);
+                std::string advertisingName = "Echo-" + username + "[windows]";
+                advertisement.LocalName(winrt::to_hstring(advertisingName));
+                std::cout << "[Windows Advertiser] Set local name: " << advertisingName << std::endl;
             } catch (const winrt::hresult_error& e) {
-                std::cerr << "[Windows Advertiser] Warning: Could not add manufacturer data (HRESULT: 0x" 
+                std::cerr << "[Windows Advertiser] Warning: Could not set local name (HRESULT: 0x" 
                           << std::hex << e.code() << std::dec << ")" << std::endl;
-                // Continue - manufacturer data is optional for basic advertising
             }
             
+            // Add service UUID using CBUUID string format
+            try {
+                // Try using the string-based UUID approach instead of GUID
+                auto serviceUuids = advertisement.ServiceUuids();
+                
+                // Windows expects GUIDs in standard format
+                winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A, 
+                    { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
+                
+                serviceUuids.Append(serviceGuid);
+                std::cout << "[Windows Advertiser] Added service UUID" << std::endl;
+            } catch (const winrt::hresult_error& e) {
+                std::cerr << "[Windows Advertiser] Error adding service UUID (HRESULT: 0x" 
+                          << std::hex << e.code() << std::dec << "): " 
+                          << winrt::to_string(e.message()) << std::endl;
+                // Service UUID is critical - re-throw
+                throw;
+            }
+            
+            // Set publisher status callback
             publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
                                            BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
                 onStatusChanged(sender, args);
             });
             
+            // Start advertising
+            std::cout << "[Windows Advertiser] Starting publisher..." << std::endl;
             publisher_.Start();
             
-            std::cout << "[Windows Advertiser] Started advertising as: Echo-" << username << "[windows]" << std::endl;
+            std::cout << "[Windows Advertiser] Successfully started advertising" << std::endl;
+            std::cout << "[Windows Advertiser] Broadcasting as: Echo-" << username << "[windows]" << std::endl;
             std::cout << "[Windows Advertiser] Service UUID: " << ECHO_SERVICE_UUID << std::endl;
             
             return true;

@@ -59,20 +59,28 @@ echo.
 
 REM Get vcpkg path
 set "VCPKG_ROOT="
-if exist "build\vcpkg\vcpkg.exe" (
+if exist "vcpkg\vcpkg.exe" (
+    set "VCPKG_ROOT=%cd%\vcpkg"
+    echo [OK] Using project vcpkg
+) else if exist "build\vcpkg\vcpkg.exe" (
     set "VCPKG_ROOT=%cd%\build\vcpkg"
     echo [OK] Using local vcpkg
 ) else if defined VCPKG_ROOT (
     if exist "%VCPKG_ROOT%\vcpkg.exe" (
-        echo [OK] Using system vcpkg
+        echo [OK] Using system vcpkg from %VCPKG_ROOT%
     ) else (
-        echo [ERROR] VCPKG_ROOT set but vcpkg.exe not found
+        echo [ERROR] VCPKG_ROOT set but vcpkg.exe not found at: %VCPKG_ROOT%
         echo Run setup.bat to install dependencies
         pause
         exit /b 1
     )
 ) else (
     echo [ERROR] vcpkg not found
+    echo Expected locations:
+    echo   - %cd%\vcpkg\vcpkg.exe
+    echo   - %cd%\build\vcpkg\vcpkg.exe
+    echo   - VCPKG_ROOT environment variable
+    echo.
     echo Run setup.bat first to install dependencies
     pause
     exit /b 1

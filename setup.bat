@@ -90,9 +90,38 @@ if not exist ".git" (
 REM Create build directory if it doesn't exist
 if not exist "build" mkdir "build"
 
-REM Setup vcpkg in build directory
-echo Setting up vcpkg and dependencies in build directory...
+REM Setup vcpkg - check git submodule first, then build directory
+echo Setting up vcpkg and dependencies...
 
+REM Check for vcpkg as git submodule at project root
+if exist "vcpkg\vcpkg.exe" (
+    echo [OK] Using vcpkg from git submodule
+    set "VCPKG_EXE=vcpkg\vcpkg.exe"
+    set "VCPKG_ROOT=%cd%\vcpkg"
+    goto :vcpkg_ready
+)
+
+REM Check if vcpkg submodule exists but not bootstrapped
+if exist "vcpkg\.git" (
+    if not exist "vcpkg\vcpkg.exe" (
+        echo [INFO] vcpkg submodule found but not bootstrapped
+        echo Bootstrapping vcpkg...
+        cd vcpkg
+        call bootstrap-vcpkg.bat
+        if %errorlevel% neq 0 (
+            echo [ERROR] Failed to bootstrap vcpkg
+            cd ..
+            pause
+            exit /b 1
+        )
+        cd ..
+        set "VCPKG_EXE=vcpkg\vcpkg.exe"
+        set "VCPKG_ROOT=%cd%\vcpkg"
+        goto :vcpkg_ready
+    )
+)
+
+REM Check for vcpkg in build directory (legacy location)
 if exist "build\vcpkg\vcpkg.exe" (
     echo [OK] Using local vcpkg installation in build directory
     set "VCPKG_EXE=build\vcpkg\vcpkg.exe"
@@ -100,6 +129,7 @@ if exist "build\vcpkg\vcpkg.exe" (
     goto :vcpkg_ready
 )
 
+REM Check environment variable
 if defined VCPKG_ROOT (
     if exist "%VCPKG_ROOT%\vcpkg.exe" (
         echo [OK] Using existing vcpkg at: %VCPKG_ROOT%
@@ -108,7 +138,7 @@ if defined VCPKG_ROOT (
     )
 )
 
-REM Install vcpkg in build directory
+REM Install vcpkg in build directory (fallback)
 echo Installing vcpkg in build directory...
 if exist "build\vcpkg" rmdir /s /q "build\vcpkg"
 
