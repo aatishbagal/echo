@@ -342,7 +342,13 @@ void ConsoleUI::sendMessage(const std::string& message, BluetoothManager& blueto
 void ConsoleUI::displayMessage(const std::string& from, const std::string& message, bool isPrivate) {
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
+    
+#ifdef _WIN32
+    std::tm tm;
+    localtime_s(&tm, &time_t);
+#else
     std::tm tm = *std::localtime(&time_t);
+#endif
     
     std::cout << std::endl;
     std::cout << "[" << std::put_time(&tm, "%H:%M:%S") << "] ";
@@ -513,7 +519,7 @@ void ConsoleUI::onDataReceived(const std::string& address, const std::vector<uin
     try {
         auto msg = Message::deserialize(data);
         processReceivedMessage(msg, address);
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
         if (currentChatMode_ == ChatMode::NONE) {
             std::cout << "\n[DATA] Received " << data.size() << " bytes from " << address << std::endl;
             std::cout << getPrompt();
@@ -522,7 +528,7 @@ void ConsoleUI::onDataReceived(const std::string& address, const std::vector<uin
     }
 }
 
-void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& sourceAddress) {
+void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& /* sourceAddress */) {
     if (msg.header.type == MessageType::TEXT_MESSAGE || 
         msg.header.type == MessageType::GLOBAL_MESSAGE ||
         msg.header.type == MessageType::PRIVATE_MESSAGE) {

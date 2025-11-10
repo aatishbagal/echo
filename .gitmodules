@@ -1,0 +1,6 @@
+[submodule "external/simpleble"]
+	path = external/simpleble
+	url = https://github.com/OpenBluetoothToolbox/SimpleBLE.git
+[submodule "vcpkg"]
+	path = vcpkg
+	url = https://github.com/microsoft/vcpkg.git

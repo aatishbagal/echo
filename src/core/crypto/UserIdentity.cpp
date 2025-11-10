@@ -55,8 +55,8 @@ std::string UserIdentity::generateRandomUsername() {
     static std::random_device rd;
     static std::mt19937 gen(rd());
     
-    std::uniform_int_distribution<> adjDist(0, UsernameLists::adjectives.size() - 1);
-    std::uniform_int_distribution<> nounDist(0, UsernameLists::nouns.size() - 1);
+    std::uniform_int_distribution<size_t> adjDist(0, UsernameLists::adjectives.size() - 1);
+    std::uniform_int_distribution<size_t> nounDist(0, UsernameLists::nouns.size() - 1);
     
     std::string adjective = UsernameLists::adjectives[adjDist(gen)];
     std::string noun = UsernameLists::nouns[nounDist(gen)];
