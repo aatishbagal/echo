@@ -16,6 +16,9 @@ BluetoothManager::BluetoothManager()
 #ifdef __linux__
     bluezAdvertiser_ = std::make_unique<BluezAdvertiser>();
 #endif
+#ifdef __APPLE__
+    macosAdvertiser_ = std::make_unique<MacOSAdvertiser>();
+#endif
 }
 
 BluetoothManager::~BluetoothManager() {
@@ -335,6 +338,14 @@ bool BluetoothManager::startEchoAdvertising(const std::string& username, const s
     }
 #endif
 
+#ifdef __APPLE__
+    if (macosAdvertiser_) {
+        success = macosAdvertiser_->startAdvertising(username, fingerprint);
+    } else {
+        std::cerr << "macOS advertiser not initialized" << std::endl;
+    }
+#endif
+
     if (success) {
         isAdvertising_ = true;
         std::cout << "Echo advertising started successfully" << std::endl;
@@ -359,6 +370,12 @@ void BluetoothManager::stopEchoAdvertising() {
 #ifdef __linux__
     if (bluezAdvertiser_) {
         bluezAdvertiser_->stopAdvertising();
+    }
+#endif
+
+#ifdef __APPLE__
+    if (macosAdvertiser_) {
+        macosAdvertiser_->stopAdvertising();
     }
 #endif
 

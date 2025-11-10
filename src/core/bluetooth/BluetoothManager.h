@@ -18,6 +18,10 @@
 #include "BluezAdvertiser.h"
 #endif
 
+#ifdef __APPLE__
+#include "MacOSAdvertiser.h"
+#endif
+
 namespace echo {
 
 struct DiscoveredDevice {
@@ -99,6 +103,9 @@ private:
 #endif
 #ifdef __linux__
     std::unique_ptr<BluezAdvertiser> bluezAdvertiser_;
+#endif
+#ifdef __APPLE__
+    std::unique_ptr<MacOSAdvertiser> macosAdvertiser_;
 #endif
     
     // BitChat specific UUIDs (from actual BitChat implementation)
