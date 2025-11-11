@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <fstream>
+#include <iomanip>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -29,7 +30,7 @@ public:
             truncatedUsername = truncatedUsername.substr(0, 20);
         }
         
-        std::string scriptContent = generatePythonScript(deviceName, peerId, truncatedUsername);
+        std::string scriptContent = generatePythonScript(deviceName, truncatedUsername);
         
         std::string scriptPath = "/tmp/echo_advertise.py";
         std::ofstream scriptFile(scriptPath);
@@ -87,13 +88,18 @@ public:
 private:
     pid_t advertiserPid_;
     
-    std::string generatePythonScript(const std::string& deviceName, const std::string& peerId, const std::string& username) {
-        std::ostringstream usernameHex;
+    std::string generatePythonScript(const std::string& deviceName, const std::string& username) {
+        std::ostringstream manufacturerData;
+        manufacturerData << "dbus.Array([dbus.Byte(0x11)";
         for (unsigned char c : username) {
-            usernameHex << "\\x" << std::hex << std::setw(2) << std::setfill('0') << (int)c;
+            manufacturerData << ", dbus.Byte(" << static_cast<int>(c) << ")";
         }
+        manufacturerData << "], signature='y')";
         
-        return R"(#!/usr/bin/env python3
+        std::string manufacturerDataStr = manufacturerData.str();
+        
+        std::ostringstream script;
+        script << R"(#!/usr/bin/env python3
 import dbus
 import dbus.exceptions
 import dbus.mainloop.glib
@@ -118,13 +124,16 @@ class Advertisement(dbus.service.Object):
         self.service_uuids = ['F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C']
         
         self.manufacturer_data = dbus.Dictionary({
-            dbus.UInt16(0xFFFF): dbus.Array([
-                dbus.Byte(0x11),
-)" + "                dbus.Byte(ord(c)) for c in \"" + username + R"(\"
-            ], signature='y')
+            dbus.UInt16(0xFFFF): )";
+        
+        script << manufacturerDataStr;
+        
+        script << R"(
         }, signature='qv')
         
-        self.local_name = ')" + deviceName + R"('
+        self.local_name = ')";
+        script << deviceName;
+        script << R"('
         self.include_tx_power = False
         dbus.service.Object.__init__(self, bus, self.path)
 
@@ -206,6 +215,8 @@ def main():
 if __name__ == '__main__':
     main()
 )";
+        
+        return script.str();
     }
 };
 

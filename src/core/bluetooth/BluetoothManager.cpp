@@ -489,4 +489,20 @@ void BluetoothManager::setDataReceivedCallback(DataReceivedCallback callback) {
     dataReceivedCallback_ = std::move(callback);
 }
 
+bool BluetoothManager::broadcastMessage(const std::vector<uint8_t>& data) {
+    std::cout << "[BROADCAST] Simulating mesh broadcast of " << data.size() << " bytes" << std::endl;
+    std::cout << "[BROADCAST] Note: True mesh broadcasting requires BLE advertisement updates" << std::endl;
+    std::cout << "[BROADCAST] For now, this is a placeholder - messages won't actually send" << std::endl;
+    
+    if (messageBroadcastCallback_) {
+        messageBroadcastCallback_(data);
+    }
+    
+    return true;
+}
+
+void BluetoothManager::setMessageBroadcastCallback(MessageBroadcastCallback callback) {
+    messageBroadcastCallback_ = std::move(callback);
+}
+
 }

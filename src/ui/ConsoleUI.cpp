@@ -326,15 +326,34 @@ void ConsoleUI::sendMessage(const std::string& message, BluetoothManager& blueto
     
     auto data = msg.serialize();
     
+    std::cout << "\n[DEBUG] Message serialized: " << data.size() << " bytes" << std::endl;
+    
     if (isGlobal) {
+        std::cout << "[INFO] Global chat messaging is not yet fully implemented" << std::endl;
+        std::cout << "[INFO] Requires BLE mesh broadcasting or GATT characteristics" << std::endl;
+        std::cout << "[INFO] Your message: \"" << message << "\" (not sent)" << std::endl;
+        
         auto devices = bluetoothManager.getEchoDevices();
+        std::cout << "[INFO] Found " << devices.size() << " Echo devices:" << std::endl;
         for (const auto& device : devices) {
-            bluetoothManager.sendData(device.address, data);
+            std::cout << "[INFO]   - " << device.echoUsername << " (" << device.address << ")" << std::endl;
+            bool sent = bluetoothManager.sendData(device.address, data);
+            if (!sent) {
+                std::cout << "[INFO]     Connection-based send failed (expected)" << std::endl;
+            }
         }
     } else {
         auto targetAddress = findAddressByUsername(currentChatTarget_, bluetoothManager);
         if (!targetAddress.empty()) {
-            bluetoothManager.sendData(targetAddress, data);
+            std::cout << "[INFO] Attempting to send to " << currentChatTarget_ 
+                     << " at " << targetAddress << std::endl;
+            bool sent = bluetoothManager.sendData(targetAddress, data);
+            if (!sent) {
+                std::cout << "[ERROR] Failed to send message - device not connected or no GATT characteristics" << std::endl;
+                std::cout << "[INFO] Direct messaging requires GATT service implementation" << std::endl;
+            }
+        } else {
+            std::cout << "[ERROR] Could not find address for user: " << currentChatTarget_ << std::endl;
         }
     }
 }
