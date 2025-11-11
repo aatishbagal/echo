@@ -26,7 +26,6 @@ BluetoothManager::~BluetoothManager() {
     stopScanning();
     stopBitChatAdvertising();
     
-    // Disconnect all peripherals
     for (auto& peripheral : connectedPeripherals_) {
         if (peripheral.is_connected()) {
             peripheral.disconnect();
@@ -41,7 +40,6 @@ void BluetoothManager::initializeAdapter() {
         throw std::runtime_error("No Bluetooth adapters found");
     }
     
-    // Use the first available adapter
     adapter_ = std::make_shared<SimpleBLE::Adapter>(adapters[0]);
     
     std::cout << "Using Bluetooth adapter: " << adapter_->identifier() 
@@ -58,18 +56,15 @@ bool BluetoothManager::startScanning() {
     }
     
     try {
-        // Clear previous devices
         {
             std::lock_guard<std::mutex> lock(devicesMutex_);
             discoveredDevices_.clear();
         }
         
-        // Set up scan callback
         adapter_->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
             onPeripheralFound(std::move(peripheral));
         });
         
-        // Start continuous scanning (no timeout for better detection)
         adapter_->scan_start();
         isScanning_ = true;
         
@@ -142,7 +137,7 @@ void BluetoothManager::onPeripheralFound(SimpleBLE::Peripheral peripheral) {
     }
     
     if (device.isEchoDevice) {
-        std::cout << "Found mesh device: " << device.echoUsername 
+        std::cout << "Found Echo device: " << device.echoUsername 
                   << " (" << device.address << ") "
                   << "RSSI: " << device.rssi << " dBm" << std::endl;
     } else {
@@ -161,6 +156,7 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
         
         if (serviceUuid.find("F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C") != std::string::npos ||
             serviceUuid.find("F47B5E2D") != std::string::npos) {
+            
             auto rawServiceData = static_cast<std::vector<uint8_t>>(service.data());
             if (!rawServiceData.empty()) {
                 uint8_t header = rawServiceData[0];
@@ -177,6 +173,7 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
                         device.echoUsername = decodedUsername;
                         device.osType = (flags & 0x1) ? "windows" : "unknown";
                         device.echoFingerprint = "mesh";
+                        std::cout << "[Parser] Found Echo device with service data: " << decodedUsername << std::endl;
                         return true;
                     }
                 }
@@ -195,13 +192,20 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
                     device.echoUsername = name.substr(5);
                     device.osType = "unknown";
                 }
-                device.echoFingerprint = "mesh";
-            } else {
-                device.echoUsername = "Mesh-" + device.address.substr(0, 8);
-                device.echoFingerprint = "detected";
-                device.osType = "unknown";
+                device.echoFingerprint = "gatt";
+                std::cout << "[Parser] Found Echo device by name: " << device.echoUsername << std::endl;
+                return true;
             }
             
+            std::cout << "[Parser] Found Echo service UUID but no name/data" << std::endl;
+            std::cout << "[Parser] Device name: '" << name << "'" << std::endl;
+            std::cout << "[Parser] This appears to be a Windows 11 GATT-advertised device" << std::endl;
+            
+            device.echoUsername = "Win11-" + device.address.substr(0, 8);
+            device.echoFingerprint = "gatt-win11";
+            device.osType = "windows11";
+            
+            std::cout << "[Parser] Assigned temporary username: " << device.echoUsername << std::endl;
             return true;
         }
     }
@@ -211,6 +215,7 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
         device.echoUsername = name.substr(5);
         device.echoFingerprint = "detected";
         device.osType = "unknown";
+        std::cout << "[Parser] Found Echo device by name only: " << device.echoUsername << std::endl;
         return true;
     }
     
@@ -231,11 +236,8 @@ std::vector<DiscoveredDevice> BluetoothManager::getEchoDevices() const {
 }
 
 bool BluetoothManager::isBitChatDevice(const SimpleBLE::Peripheral& peripheral) const {
-    // We need to cast away const to call SimpleBLE methods
-    // This is a limitation of SimpleBLE's API design
     auto& mutable_peripheral = const_cast<SimpleBLE::Peripheral&>(peripheral);
     
-    // Check if the device advertises BitChat service UUID
     auto services = mutable_peripheral.services();
     for (auto& service : services) {
         if (service.uuid() == BITCHAT_SERVICE_UUID) {
@@ -243,7 +245,6 @@ bool BluetoothManager::isBitChatDevice(const SimpleBLE::Peripheral& peripheral) 
         }
     }
     
-    // Alternative check: look for specific manufacturer data or device name patterns
     std::string name = mutable_peripheral.identifier();
     return name.find("BitChat") != std::string::npos || 
            name.find("Echo") != std::string::npos;
@@ -255,7 +256,6 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
     }
     
     try {
-        // Find the peripheral in our discovered devices
         auto peripherals = adapter_->scan_get_results();
         
         for (auto& peripheral : peripherals) {
@@ -265,7 +265,6 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
                 if (peripheral.is_connected()) {
                     connectedPeripherals_.push_back(peripheral);
                     
-                    // Set up connection callbacks
                     peripheral.set_callback_on_connected([this, address]() {
                         onPeripheralConnected(*findConnectedPeripheral(address));
                     });
@@ -292,7 +291,6 @@ void BluetoothManager::disconnectFromDevice(const std::string& address) {
     if (peripheral && peripheral->is_connected()) {
         peripheral->disconnect();
         
-        // Remove from connected list
         connectedPeripherals_.erase(
             std::remove_if(connectedPeripherals_.begin(), connectedPeripherals_.end(),
                 [&address](SimpleBLE::Peripheral& p) {
@@ -415,7 +413,6 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
     }
     
     try {
-        // Find BitChat message characteristic
         auto services = peripheral->services();
         for (auto& service : services) {
             if (service.uuid() == BITCHAT_SERVICE_UUID) {
@@ -436,7 +433,6 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
     return false;
 }
 
-// Callback setters
 void BluetoothManager::setDeviceDiscoveredCallback(DeviceDiscoveredCallback callback) {
     deviceDiscoveredCallback_ = std::move(callback);
 }
@@ -453,4 +449,4 @@ void BluetoothManager::setDataReceivedCallback(DataReceivedCallback callback) {
     dataReceivedCallback_ = std::move(callback);
 }
 
-} // namespace echo
+}
