@@ -160,6 +160,11 @@ void BluetoothManager::onPeripheralFound(SimpleBLE::Peripheral peripheral) {
                             std::lock_guard<std::mutex> lock(devicesMutex_);
                             connectedPeripherals_.push_back(peripheral);
                         }
+                        try {
+                            prepareMessagingForPeripheral(connectedPeripherals_.back());
+                        } catch (const std::exception& e) {
+                            std::cerr << "[GATT PREP FAILED] " << e.what() << std::endl;
+                        }
                         std::cout << "[AUTO-CONNECTED] " << peripheral.identifier() 
                                  << " ready for messaging" << std::endl;
                         if (deviceConnectedCallback_) {
@@ -339,6 +344,11 @@ void BluetoothManager::disconnectFromDevice(const std::string& address) {
 }
 
 void BluetoothManager::onPeripheralConnected(SimpleBLE::Peripheral peripheral) {
+    try {
+        prepareMessagingForPeripheral(peripheral);
+    } catch (const std::exception& e) {
+        std::cerr << "[GATT INIT FAILED] " << e.what() << std::endl;
+    }
     if (deviceConnectedCallback_) {
         deviceConnectedCallback_(peripheral.address());
     }
@@ -357,6 +367,27 @@ SimpleBLE::Peripheral* BluetoothManager::findConnectedPeripheral(const std::stri
         });
     
     return it != connectedPeripherals_.end() ? &(*it) : nullptr;
+}
+
+void BluetoothManager::prepareMessagingForPeripheral(SimpleBLE::Peripheral& peripheral) {
+    auto services = peripheral.services();
+    for (auto& service : services) {
+        if (service.uuid() == BITCHAT_SERVICE_UUID) {
+            auto characteristics = service.characteristics();
+            for (auto& characteristic : characteristics) {
+                if (characteristic.uuid() == BITCHAT_RX_CHAR_UUID || characteristic.uuid() == BITCHAT_MESH_CHAR_UUID) {
+                    if (characteristic.can_notify()) {
+                        peripheral.notify(service.uuid(), characteristic.uuid(), [this, addr = peripheral.address()](SimpleBLE::ByteArray payload) {
+                            std::vector<uint8_t> data(payload.begin(), payload.end());
+                            if (dataReceivedCallback_) {
+                                dataReceivedCallback_(addr, data);
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    }
 }
 
 bool BluetoothManager::startBitChatAdvertising() {

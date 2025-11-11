@@ -112,6 +112,7 @@ private:
     bool isBitChatDevice(const SimpleBLE::Peripheral& peripheral) const;
     bool parseEchoDevice(const SimpleBLE::Peripheral& peripheral, DiscoveredDevice& device);
     SimpleBLE::Peripheral* findConnectedPeripheral(const std::string& address);
+    void prepareMessagingForPeripheral(SimpleBLE::Peripheral& peripheral);
 };
 
 } // namespace echo
