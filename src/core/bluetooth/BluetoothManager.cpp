@@ -442,10 +442,48 @@ bool BluetoothManager::isAdvertising() const {
 }
 
 bool BluetoothManager::sendData(const std::string& address, const std::vector<uint8_t>& data) {
+    {
+        std::lock_guard<std::mutex> lock(devicesMutex_);
+        auto* peripheral = findConnectedPeripheral(address);
+        
+        if (peripheral && peripheral->is_connected()) {
+            try {
+                auto services = peripheral->services();
+                for (auto& service : services) {
+                    if (service.uuid() == BITCHAT_SERVICE_UUID) {
+                        auto characteristics = service.characteristics();
+                        for (auto& characteristic : characteristics) {
+                            if (characteristic.uuid() == BITCHAT_TX_CHAR_UUID) {
+                                peripheral->write_request(service.uuid(), characteristic.uuid(), data);
+                                std::cout << "[SENT] " << data.size() << " bytes to " << address << std::endl;
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                std::cerr << "[SEND FAILED] No TX characteristic found for " << address << std::endl;
+                return false;
+                
+            } catch (const std::exception& e) {
+                std::cerr << "Failed to send data to " << address << ": " << e.what() << std::endl;
+                return false;
+            }
+        }
+    }
+    
+    std::cout << "[SEND] Device " << address << " not connected, attempting connection..." << std::endl;
+    
+    bool connected = connectToDevice(address);
+    if (!connected) {
+        std::cerr << "[SEND FAILED] Could not connect to device " << address << std::endl;
+        return false;
+    }
+    
     std::lock_guard<std::mutex> lock(devicesMutex_);
     auto* peripheral = findConnectedPeripheral(address);
     if (!peripheral || !peripheral->is_connected()) {
-        std::cerr << "[SEND FAILED] Device " << address << " not connected" << std::endl;
+        std::cerr << "[SEND FAILED] Device " << address << " connection lost" << std::endl;
         return false;
     }
     
