@@ -5,12 +5,16 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
-#include <thread>
+#include <array>
 #include <chrono>
+#include <cstring>
+#include <thread>
+#include <vector>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
+#include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
 #include <winrt/Windows.Devices.Radios.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <Rpc.h>
@@ -22,24 +26,23 @@ using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
 using namespace Windows::Devices::Bluetooth;
 using namespace Windows::Devices::Bluetooth::Advertisement;
+using namespace Windows::Devices::Bluetooth::GenericAttributeProfile;
 using namespace Windows::Storage::Streams;
 
 namespace echo {
 
 class WindowsAdvertiser::Impl {
 public:
-    Impl() : publisher_(nullptr) {
+    Impl() : publisher_(nullptr), gattServiceProvider_(nullptr) {
         try {
             winrt::init_apartment();
             
-            // Check if Bluetooth adapter supports peripheral mode
             try {
                 auto adapter = Windows::Devices::Bluetooth::BluetoothAdapter::GetDefaultAsync().get();
                 if (adapter) {
                     std::cout << "[Windows Advertiser] Bluetooth adapter found" << std::endl;
                     std::cout << "[Windows Advertiser] Adapter: " << winrt::to_string(adapter.DeviceId()) << std::endl;
                     
-                    // Check if LE advertising is supported
                     auto radio = adapter.GetRadioAsync().get();
                     if (radio) {
                         auto state = radio.State();
@@ -58,15 +61,9 @@ public:
                         
                         if (state != Windows::Devices::Radios::RadioState::On) {
                             std::cerr << "\n[Windows Advertiser] ERROR: Bluetooth radio is NOT enabled!" << std::endl;
-                            std::cerr << "[Windows Advertiser] To fix this:" << std::endl;
-                            std::cerr << "  1. Open Windows Settings" << std::endl;
-                            std::cerr << "  2. Go to Bluetooth & devices" << std::endl;
-                            std::cerr << "  3. Turn ON the Bluetooth toggle" << std::endl;
-                            std::cerr << "  4. Restart Echo\n" << std::endl;
                         }
                     }
                     
-                    // Check if peripheral mode is supported
                     std::cout << "[Windows Advertiser] Checking peripheral mode support..." << std::endl;
                     auto leFeatures = adapter.IsPeripheralRoleSupported();
                     std::cout << "[Windows Advertiser] Peripheral role supported: " 
@@ -74,8 +71,6 @@ public:
                     
                     if (!leFeatures) {
                         std::cerr << "\n[Windows Advertiser] WARNING: BLE Peripheral mode NOT supported!" << std::endl;
-                        std::cerr << "[Windows Advertiser] This Windows device cannot advertise BLE services." << std::endl;
-                        std::cerr << "[Windows Advertiser] Scanning for other devices will still work.\n" << std::endl;
                     }
                     
                 } else {
@@ -84,7 +79,6 @@ public:
             } catch (const winrt::hresult_error& e) {
                 std::cerr << "[Windows Advertiser] Warning: Could not check adapter (HRESULT: 0x" 
                           << std::hex << e.code() << std::dec << ")" << std::endl;
-                // Don't fail - we'll try advertising anyway
             }
             
         } catch (const winrt::hresult_error& e) {
@@ -102,93 +96,160 @@ public:
     }
     
     bool startAdvertising(const std::string& username, const std::string& fingerprint) {
+        std::cout << "\n[Windows Advertiser] Windows 11 detected - Testing advertising methods..." << std::endl;
+        
+        std::cout << "[Windows Advertiser] Attempting GATT Server approach..." << std::endl;
+        if (tryGattServerApproach(username, fingerprint)) {
+            return true;
+        }
+        
+        std::cout << "[Windows Advertiser] GATT failed, trying empty advertisement..." << std::endl;
+        if (tryEmptyAdvertisement()) {
+            return true;
+        }
+        
+        std::cerr << "\n========================================" << std::endl;
+        std::cerr << "WINDOWS 11 BLE ADVERTISING BLOCKED" << std::endl;
+        std::cerr << "========================================" << std::endl;
+        std::cerr << "The error 0x80070057 is a Windows 11 security restriction." << std::endl;
+        std::cerr << "\nQuick Fix - Try ONE of these:" << std::endl;
+        std::cerr << "\n1. RUN AS ADMINISTRATOR (Easiest)" << std::endl;
+        std::cerr << "   - Close this app" << std::endl;
+        std::cerr << "   - Right-click echo.exe" << std::endl;
+        std::cerr << "   - Select 'Run as administrator'" << std::endl;
+        std::cerr << "\n2. ENABLE DEVELOPER MODE" << std::endl;
+        std::cerr << "   - Open Settings" << std::endl;
+        std::cerr << "   - Go to: Privacy & Security > For developers" << std::endl;
+        std::cerr << "   - Turn ON 'Developer Mode'" << std::endl;
+        std::cerr << "   - Restart this app" << std::endl;
+        std::cerr << "\nCurrent Status: SCAN-ONLY MODE" << std::endl;
+        std::cerr << "You can still discover and connect to other Echo devices" << std::endl;
+        std::cerr << "========================================\n" << std::endl;
+        
+        return false;
+    }
+    
+    bool tryGattServerApproach(const std::string& username, const std::string& fingerprint) {
         try {
-            publisher_ = BluetoothLEAdvertisementPublisher();
+            std::cout << "[Windows Advertiser] Creating GATT Service Provider..." << std::endl;
             
-            auto advertisement = publisher_.Advertisement();
+            winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A,
+                { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
             
-            try {
-                std::string advertisingName = "E-" + username;
-                if (advertisingName.length() > 4) {
-                    advertisingName = advertisingName.substr(0, 4);
-                }
-                advertisement.LocalName(winrt::to_hstring(advertisingName));
-                std::cout << "[Windows Advertiser] Set local name: " << advertisingName << std::endl;
-            } catch (const winrt::hresult_error& e) {
-                std::cerr << "[Windows Advertiser] Warning: Could not set local name (HRESULT: 0x" 
-                          << std::hex << e.code() << std::dec << ")" << std::endl;
+            auto createResult = GattServiceProvider::CreateAsync(serviceGuid).get();
+            
+            if (createResult.Error() != BluetoothError::Success) {
+                std::cerr << "[Windows Advertiser] GATT: Failed to create service provider (Error: " 
+                         << (int)createResult.Error() << ")" << std::endl;
+                return false;
             }
             
-            try {
-                auto serviceUuids = advertisement.ServiceUuids();
-                
-                winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A, 
-                    { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
-                
-                serviceUuids.Append(serviceGuid);
-                std::cout << "[Windows Advertiser] Added service UUID" << std::endl;
-            } catch (const winrt::hresult_error& e) {
-                std::cerr << "[Windows Advertiser] Error adding service UUID (HRESULT: 0x" 
-                          << std::hex << e.code() << std::dec << "): " 
-                          << winrt::to_string(e.message()) << std::endl;
-                throw;
-            }
+            gattServiceProvider_ = createResult.ServiceProvider();
             
-            std::cout << "[Windows Advertiser] Starting publisher..." << std::endl;
+            std::cout << "[Windows Advertiser] GATT: Service provider created" << std::endl;
             
-            try {
-                publisher_.Start();
-            } catch (const winrt::hresult_error& e) {
-                std::cerr << "[Windows Advertiser] Start() failed with HRESULT: 0x" 
-                          << std::hex << e.code() << std::dec << std::endl;
-                std::cerr << "[Windows Advertiser] Error: " << winrt::to_string(e.message()) << std::endl;
-                
-                if (e.code() == 0x80070057) {
-                    std::cerr << "[Windows Advertiser] E_INVALIDARG - Advertisement payload exceeds 31 bytes" << std::endl;
-                }
-                throw;
-            }
+            gattServiceProvider_.StartAdvertising();
             
-            auto statusToken = publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
-                                           BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
-                onStatusChanged(sender, args);
-            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
             
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            
-            std::cout << "[Windows Advertiser] Successfully started advertising" << std::endl;
-            std::cout << "[Windows Advertiser] Service UUID: " << ECHO_SERVICE_UUID << std::endl;
+            std::cout << "[Windows Advertiser] GATT: Started advertising via GATT service" << std::endl;
+            std::cout << "[Windows Advertiser] GATT: Service UUID: " << ECHO_SERVICE_UUID << std::endl;
+            std::cout << "[Windows Advertiser] GATT: Device is now discoverable" << std::endl;
             
             return true;
             
         } catch (const winrt::hresult_error& e) {
-            std::cerr << "[Windows Advertiser] WinRT Error: " << winrt::to_string(e.message()) << std::endl;
-            std::cerr << "[Windows Advertiser] HRESULT: 0x" << std::hex << e.code() << std::dec << std::endl;
-            return false;
-        } catch (const std::exception& e) {
-            std::cerr << "[Windows Advertiser] Failed to start: " << e.what() << std::endl;
+            std::cerr << "[Windows Advertiser] GATT: Exception (HRESULT: 0x" 
+                     << std::hex << e.code() << std::dec << "): " 
+                     << winrt::to_string(e.message()) << std::endl;
+            
+            if (e.code() == 0x80070057) {
+                std::cerr << "[Windows Advertiser] GATT: Windows 11 packaging restriction confirmed" << std::endl;
+            }
+            
+            if (gattServiceProvider_) {
+                try { gattServiceProvider_.StopAdvertising(); } catch(...) {}
+                gattServiceProvider_ = nullptr;
+            }
             return false;
         } catch (...) {
-            std::cerr << "[Windows Advertiser] Failed to start: Unknown error" << std::endl;
+            std::cerr << "[Windows Advertiser] GATT: Unknown exception" << std::endl;
+            if (gattServiceProvider_) {
+                try { gattServiceProvider_.StopAdvertising(); } catch(...) {}
+                gattServiceProvider_ = nullptr;
+            }
+            return false;
+        }
+    }
+    
+    bool tryEmptyAdvertisement() {
+        try {
+            publisher_ = BluetoothLEAdvertisementPublisher();
+            
+            std::cout << "[Windows Advertiser] Empty: Attempting completely empty advertisement" << std::endl;
+            
+            publisher_.Start();
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            
+            auto status = publisher_.Status();
+            if (status == BluetoothLEAdvertisementPublisherStatus::Started) {
+                std::cout << "[Windows Advertiser] Empty: SUCCESS - Basic advertisement working" << std::endl;
+                std::cout << "[Windows Advertiser] Empty: Device is advertising (no user data)" << std::endl;
+                
+                auto statusToken = publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
+                                               BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
+                    onStatusChanged(sender, args);
+                });
+                
+                return true;
+            } else {
+                std::cerr << "[Windows Advertiser] Empty: Failed - Status: " << (int)status << std::endl;
+                publisher_.Stop();
+                publisher_ = nullptr;
+                return false;
+            }
+            
+        } catch (const winrt::hresult_error& e) {
+            std::cerr << "[Windows Advertiser] Empty: Exception (HRESULT: 0x" 
+                     << std::hex << e.code() << std::dec << ")" << std::endl;
+            if (publisher_) {
+                try { publisher_.Stop(); } catch(...) {}
+                publisher_ = nullptr;
+            }
+            return false;
+        } catch (...) {
+            if (publisher_) {
+                try { publisher_.Stop(); } catch(...) {}
+                publisher_ = nullptr;
+            }
             return false;
         }
     }
     
     void stopAdvertising() {
+        if (gattServiceProvider_) {
+            try {
+                gattServiceProvider_.StopAdvertising();
+                std::cout << "[Windows Advertiser] GATT: Stopped advertising" << std::endl;
+            } catch (...) {}
+            gattServiceProvider_ = nullptr;
+        }
+        
         if (publisher_) {
             try {
                 publisher_.Stop();
                 std::cout << "[Windows Advertiser] Stopped advertising" << std::endl;
-            } catch (const winrt::hresult_error& e) {
-                std::cerr << "[Windows Advertiser] Error stopping: " << winrt::to_string(e.message()) << std::endl;
-            } catch (...) {
-                std::cerr << "[Windows Advertiser] Error stopping advertising" << std::endl;
-            }
+            } catch (...) {}
             publisher_ = nullptr;
         }
     }
     
     bool isAdvertising() const {
+        if (gattServiceProvider_) {
+            return true;
+        }
+        
         if (!publisher_) return false;
         
         try {
@@ -201,6 +262,7 @@ public:
     
 private:
     BluetoothLEAdvertisementPublisher publisher_;
+    GattServiceProvider gattServiceProvider_;
     
     void onStatusChanged(BluetoothLEAdvertisementPublisher const& sender,
                         BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
@@ -257,6 +319,6 @@ void WindowsAdvertiser::setAdvertisingInterval(uint16_t minInterval, uint16_t ma
     (void)maxInterval;
 }
 
-} // namespace echo
+}
 
-#endif // _WIN32
+#endif

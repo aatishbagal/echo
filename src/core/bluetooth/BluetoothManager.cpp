@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <vector>
 
 namespace echo {
 
@@ -160,6 +161,26 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
         
         if (serviceUuid.find("F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C") != std::string::npos ||
             serviceUuid.find("F47B5E2D") != std::string::npos) {
+            auto rawServiceData = static_cast<std::vector<uint8_t>>(service.data());
+            if (!rawServiceData.empty()) {
+                uint8_t header = rawServiceData[0];
+                uint8_t version = header >> 4;
+                uint8_t flags = header & 0x0F;
+
+                if (version == 1) {
+                    std::string decodedUsername;
+                    if (rawServiceData.size() > 1) {
+                        decodedUsername.assign(rawServiceData.begin() + 1, rawServiceData.end());
+                    }
+
+                    if (!decodedUsername.empty()) {
+                        device.echoUsername = decodedUsername;
+                        device.osType = (flags & 0x1) ? "windows" : "unknown";
+                        device.echoFingerprint = "mesh";
+                        return true;
+                    }
+                }
+            }
             
             std::string name = mutable_peripheral.identifier();
             
