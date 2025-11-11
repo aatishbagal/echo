@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstdint>
 #include <atomic>
+#include <functional>
 
 namespace echo {
 
@@ -20,6 +21,11 @@ public:
     bool isAdvertising() const;
     
     void setAdvertisingInterval(uint16_t minInterval, uint16_t maxInterval);
+    
+    using MessageReceivedCallback = std::function<void(const std::vector<uint8_t>&)>;
+    void setMessageReceivedCallback(MessageReceivedCallback callback);
+    
+    bool sendMessageViaCharacteristic(const std::vector<uint8_t>& data);
     
 private:
     class Impl;

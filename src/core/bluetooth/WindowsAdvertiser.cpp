@@ -96,23 +96,16 @@ public:
     }
     
     bool startAdvertising(const std::string& username, const std::string& fingerprint) {
-        std::cout << "\n[Windows Advertiser] Windows 11 detected - Testing advertising methods..." << std::endl;
+        std::cout << "\n[Windows Advertiser] Starting GATT service with characteristics..." << std::endl;
         
-        std::cout << "[Windows Advertiser] Attempting GATT Server approach..." << std::endl;
-        if (tryGattServerApproach(username, fingerprint)) {
-            return true;
-        }
-        
-        std::cout << "[Windows Advertiser] GATT failed, trying empty advertisement..." << std::endl;
-        if (tryEmptyAdvertisement()) {
+        if (tryGattServerWithCharacteristics(username, fingerprint)) {
             return true;
         }
         
         std::cerr << "\n========================================" << std::endl;
         std::cerr << "WINDOWS 11 BLE ADVERTISING BLOCKED" << std::endl;
         std::cerr << "========================================" << std::endl;
-        std::cerr << "The error 0x80070057 is a Windows 11 security restriction." << std::endl;
-        std::cerr << "\nQuick Fix - Try ONE of these:" << std::endl;
+        std::cerr << "Quick Fix - Try ONE of these:" << std::endl;
         std::cerr << "\n1. RUN AS ADMINISTRATOR (Easiest)" << std::endl;
         std::cerr << "   - Close this app" << std::endl;
         std::cerr << "   - Right-click echo.exe" << std::endl;
@@ -122,16 +115,14 @@ public:
         std::cerr << "   - Go to: Privacy & Security > For developers" << std::endl;
         std::cerr << "   - Turn ON 'Developer Mode'" << std::endl;
         std::cerr << "   - Restart this app" << std::endl;
-        std::cerr << "\nCurrent Status: SCAN-ONLY MODE" << std::endl;
-        std::cerr << "You can still discover and connect to other Echo devices" << std::endl;
         std::cerr << "========================================\n" << std::endl;
         
         return false;
     }
     
-    bool tryGattServerApproach(const std::string& username, const std::string& fingerprint) {
+    bool tryGattServerWithCharacteristics(const std::string& username, const std::string& fingerprint) {
         try {
-            std::cout << "[Windows Advertiser] Creating GATT Service Provider..." << std::endl;
+            std::cout << "[Windows GATT] Creating GATT Service Provider..." << std::endl;
             
             winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A,
                 { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
@@ -139,32 +130,85 @@ public:
             auto createResult = GattServiceProvider::CreateAsync(serviceGuid).get();
             
             if (createResult.Error() != BluetoothError::Success) {
-                std::cerr << "[Windows Advertiser] GATT: Failed to create service provider (Error: " 
+                std::cerr << "[Windows GATT] Failed to create service provider (Error: " 
                          << (int)createResult.Error() << ")" << std::endl;
                 return false;
             }
             
             gattServiceProvider_ = createResult.ServiceProvider();
+            auto service = gattServiceProvider_.Service();
             
-            std::cout << "[Windows Advertiser] GATT: Service provider created" << std::endl;
+            std::cout << "[Windows GATT] Creating TX characteristic (for sending)..." << std::endl;
             
+            winrt::guid txCharGuid(0x8E9B7A4C, 0x2D5F, 0x4B6A,
+                { 0x9C, 0x3E, 0x1F, 0x8D, 0x7B, 0x2A, 0x5C, 0x4E });
+            
+            GattLocalCharacteristicParameters txParams;
+            txParams.CharacteristicProperties(
+                GattCharacteristicProperties::Read | 
+                GattCharacteristicProperties::Notify
+            );
+            txParams.ReadProtectionLevel(GattProtectionLevel::Plain);
+            
+            auto txResult = service.CreateCharacteristicAsync(txCharGuid, txParams).get();
+            
+            if (txResult.Error() != BluetoothError::Success) {
+                std::cerr << "[Windows GATT] Failed to create TX characteristic" << std::endl;
+                return false;
+            }
+            
+            txCharacteristic_ = txResult.Characteristic();
+            std::cout << "[Windows GATT] TX characteristic created successfully" << std::endl;
+            
+            std::cout << "[Windows GATT] Creating RX characteristic (for receiving)..." << std::endl;
+            
+            winrt::guid rxCharGuid(0x6D4A9B2E, 0x5C7F, 0x4A8D,
+                { 0x9B, 0x3C, 0x2E, 0x1F, 0x8D, 0x7A, 0x4B, 0x5C });
+            
+            GattLocalCharacteristicParameters rxParams;
+            rxParams.CharacteristicProperties(
+                GattCharacteristicProperties::Write | 
+                GattCharacteristicProperties::WriteWithoutResponse
+            );
+            rxParams.WriteProtectionLevel(GattProtectionLevel::Plain);
+            
+            auto rxResult = service.CreateCharacteristicAsync(rxCharGuid, rxParams).get();
+            
+            if (rxResult.Error() != BluetoothError::Success) {
+                std::cerr << "[Windows GATT] Failed to create RX characteristic" << std::endl;
+                return false;
+            }
+            
+            rxCharacteristic_ = rxResult.Characteristic();
+            
+            rxCharacteristic_.WriteRequested([this](
+                GattLocalCharacteristic const& characteristic,
+                GattWriteRequestedEventArgs const& args) {
+                    onWriteRequested(characteristic, args);
+                });
+            
+            std::cout << "[Windows GATT] RX characteristic created successfully" << std::endl;
+            
+            std::cout << "[Windows GATT] Starting advertising..." << std::endl;
             gattServiceProvider_.StartAdvertising();
             
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             
-            std::cout << "[Windows Advertiser] GATT: Started advertising via GATT service" << std::endl;
-            std::cout << "[Windows Advertiser] GATT: Service UUID: " << ECHO_SERVICE_UUID << std::endl;
-            std::cout << "[Windows Advertiser] GATT: Device is now discoverable" << std::endl;
+            std::cout << "[Windows GATT] GATT service started successfully!" << std::endl;
+            std::cout << "[Windows GATT] Service UUID: " << ECHO_SERVICE_UUID << std::endl;
+            std::cout << "[Windows GATT] TX Characteristic: 8E9B7A4C-2D5F-4B6A-9C3E-1F8D7B2A5C4E" << std::endl;
+            std::cout << "[Windows GATT] RX Characteristic: 6D4A9B2E-5C7F-4A8D-9B3C-2E1F8D7A4B5C" << std::endl;
+            std::cout << "[Windows GATT] Device is now discoverable and can send/receive messages" << std::endl;
             
             return true;
             
         } catch (const winrt::hresult_error& e) {
-            std::cerr << "[Windows Advertiser] GATT: Exception (HRESULT: 0x" 
+            std::cerr << "[Windows GATT] Exception (HRESULT: 0x" 
                      << std::hex << e.code() << std::dec << "): " 
                      << winrt::to_string(e.message()) << std::endl;
             
             if (e.code() == 0x80070057) {
-                std::cerr << "[Windows Advertiser] GATT: Windows 11 packaging restriction confirmed" << std::endl;
+                std::cerr << "[Windows GATT] Windows 11 packaging restriction detected" << std::endl;
             }
             
             if (gattServiceProvider_) {
@@ -173,7 +217,7 @@ public:
             }
             return false;
         } catch (...) {
-            std::cerr << "[Windows Advertiser] GATT: Unknown exception" << std::endl;
+            std::cerr << "[Windows GATT] Unknown exception" << std::endl;
             if (gattServiceProvider_) {
                 try { gattServiceProvider_.StopAdvertising(); } catch(...) {}
                 gattServiceProvider_ = nullptr;
@@ -182,56 +226,63 @@ public:
         }
     }
     
-    bool tryEmptyAdvertisement() {
+    void onWriteRequested(GattLocalCharacteristic const& characteristic,
+                         GattWriteRequestedEventArgs const& args) {
         try {
-            publisher_ = BluetoothLEAdvertisementPublisher();
+            auto deferral = args.GetDeferral();
+            auto request = args.GetRequestAsync().get();
             
-            std::cout << "[Windows Advertiser] Empty: Attempting completely empty advertisement" << std::endl;
-            
-            publisher_.Start();
-            
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            
-            auto status = publisher_.Status();
-            if (status == BluetoothLEAdvertisementPublisherStatus::Started) {
-                std::cout << "[Windows Advertiser] Empty: SUCCESS - Basic advertisement working" << std::endl;
-                std::cout << "[Windows Advertiser] Empty: Device is advertising (no user data)" << std::endl;
+            if (request) {
+                auto buffer = request.Value();
+                std::vector<uint8_t> data(buffer.Length());
                 
-                auto statusToken = publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender, 
-                                               BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
-                    onStatusChanged(sender, args);
-                });
+                DataReader reader = DataReader::FromBuffer(buffer);
+                reader.ReadBytes(data);
                 
-                return true;
-            } else {
-                std::cerr << "[Windows Advertiser] Empty: Failed - Status: " << (int)status << std::endl;
-                publisher_.Stop();
-                publisher_ = nullptr;
-                return false;
+                std::cout << "[Windows GATT] Received " << data.size() << " bytes via RX characteristic" << std::endl;
+                
+                if (messageReceivedCallback_) {
+                    messageReceivedCallback_(data);
+                }
+                
+                request.Respond();
             }
             
+            deferral.Complete();
         } catch (const winrt::hresult_error& e) {
-            std::cerr << "[Windows Advertiser] Empty: Exception (HRESULT: 0x" 
-                     << std::hex << e.code() << std::dec << ")" << std::endl;
-            if (publisher_) {
-                try { publisher_.Stop(); } catch(...) {}
-                publisher_ = nullptr;
-            }
-            return false;
-        } catch (...) {
-            if (publisher_) {
-                try { publisher_.Stop(); } catch(...) {}
-                publisher_ = nullptr;
-            }
+            std::cerr << "[Windows GATT] Error in write handler: " << winrt::to_string(e.message()) << std::endl;
+        }
+    }
+    
+    bool sendMessageViaCharacteristic(const std::vector<uint8_t>& data) {
+        if (!txCharacteristic_) {
+            std::cerr << "[Windows GATT] TX characteristic not available" << std::endl;
             return false;
         }
+        
+        try {
+            DataWriter writer;
+            writer.WriteBytes(winrt::array_view<const uint8_t>(data.data(), data.data() + data.size()));
+            auto buffer = writer.DetachBuffer();
+            
+            txCharacteristic_.NotifyValueAsync(buffer).get();
+            std::cout << "[Windows GATT] Sent " << data.size() << " bytes via TX characteristic" << std::endl;
+            return true;
+        } catch (const winrt::hresult_error& e) {
+            std::cerr << "[Windows GATT] Failed to send: " << winrt::to_string(e.message()) << std::endl;
+            return false;
+        }
+    }
+    
+    void setMessageReceivedCallback(MessageReceivedCallback callback) {
+        messageReceivedCallback_ = std::move(callback);
     }
     
     void stopAdvertising() {
         if (gattServiceProvider_) {
             try {
                 gattServiceProvider_.StopAdvertising();
-                std::cout << "[Windows Advertiser] GATT: Stopped advertising" << std::endl;
+                std::cout << "[Windows GATT] Stopped advertising" << std::endl;
             } catch (...) {}
             gattServiceProvider_ = nullptr;
         }
@@ -243,26 +294,21 @@ public:
             } catch (...) {}
             publisher_ = nullptr;
         }
+        
+        txCharacteristic_ = nullptr;
+        rxCharacteristic_ = nullptr;
     }
     
     bool isAdvertising() const {
-        if (gattServiceProvider_) {
-            return true;
-        }
-        
-        if (!publisher_) return false;
-        
-        try {
-            auto status = publisher_.Status();
-            return status == BluetoothLEAdvertisementPublisherStatus::Started;
-        } catch (...) {
-            return false;
-        }
+        return gattServiceProvider_ != nullptr || publisher_ != nullptr;
     }
     
 private:
     BluetoothLEAdvertisementPublisher publisher_;
     GattServiceProvider gattServiceProvider_;
+    GattLocalCharacteristic txCharacteristic_;
+    GattLocalCharacteristic rxCharacteristic_;
+    MessageReceivedCallback messageReceivedCallback_;
     
     void onStatusChanged(BluetoothLEAdvertisementPublisher const& sender,
                         BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
@@ -317,6 +363,14 @@ bool WindowsAdvertiser::isAdvertising() const {
 void WindowsAdvertiser::setAdvertisingInterval(uint16_t minInterval, uint16_t maxInterval) {
     (void)minInterval;
     (void)maxInterval;
+}
+
+void WindowsAdvertiser::setMessageReceivedCallback(MessageReceivedCallback callback) {
+    pImpl_->setMessageReceivedCallback(std::move(callback));
+}
+
+bool WindowsAdvertiser::sendMessageViaCharacteristic(const std::vector<uint8_t>& data) {
+    return pImpl_->sendMessageViaCharacteristic(data);
 }
 
 }
