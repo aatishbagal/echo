@@ -69,6 +69,7 @@ set(SOURCES
     src/core/bluetooth/BluetoothManager.cpp
     src/core/crypto/UserIdentity.cpp
     src/core/protocol/MessageTypes.cpp
+    src/core/protocol/CompressedMessage.cpp
     src/core/commands/IRCParser.cpp
     src/ui/ConsoleUI.cpp
 )
@@ -150,4 +151,10 @@ endif()
 # Enable debug symbols in debug builds
 set_target_properties(echo PROPERTIES
     DEBUG_POSTFIX d
+)
+
+# Test executables (optional)
+add_executable(test_compressed_message 
+    tests/test_compressed_message.cpp
+    src/core/protocol/CompressedMessage.cpp
 )
