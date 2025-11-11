@@ -101,21 +101,16 @@ public:
         std::cout << "========================================" << std::endl;
         
         bool gattSuccess = tryGattServerApproach(username, fingerprint);
-        bool publisherSuccess = tryAdvertiserApproach(username, fingerprint);
-        
-        if (gattSuccess && publisherSuccess) {
-            std::cout << "\nGATT + Publisher both active!" << std::endl;
-            std::cout << "Devices can discover you AND connect via GATT" << std::endl;
-            std::cout << "========================================\n" << std::endl;
-            return true;
-        }
         
         if (gattSuccess) {
-            std::cout << "\nGATT server active (discoverable via manual connect)" << std::endl;
-            std::cout << "Publisher failed (devices won't auto-discover)" << std::endl;
+            std::cout << "\nGATT server active" << std::endl;
+            std::cout << "Ready for connections and messaging" << std::endl;
             std::cout << "========================================\n" << std::endl;
             return true;
         }
+        
+        std::cout << "\nGATT failed, trying Publisher..." << std::endl;
+        bool publisherSuccess = tryAdvertiserApproach(username, fingerprint);
         
         if (publisherSuccess) {
             std::cout << "\nPublisher active (discoverable)" << std::endl;
