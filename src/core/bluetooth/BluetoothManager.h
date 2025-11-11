@@ -104,6 +104,10 @@ private:
     static constexpr const char* BITCHAT_TX_CHAR_UUID = "8E9B7A4C-2D5F-4B6A-9C3E-1F8D7B2A5C4E";
     static constexpr const char* BITCHAT_RX_CHAR_UUID = "6D4A9B2E-5C7F-4A8D-9B3C-2E1F8D7A4B5C";
     static constexpr const char* BITCHAT_MESH_CHAR_UUID = "9A3B5C7D-4E6F-4B8A-9D2C-3F1E8D7B4A5C";
+    void startLinuxInbox();
+    int inboxSocket_ = -1;
+    std::thread inboxThread_;
+    std::atomic<bool> inboxRunning_{false};
     
     void initializeAdapter();
     void onPeripheralFound(SimpleBLE::Peripheral peripheral);

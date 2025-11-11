@@ -418,6 +418,9 @@ bool BluetoothManager::startEchoAdvertising(const std::string& username, const s
 #ifdef __linux__
     if (bluezAdvertiser_) {
         success = bluezAdvertiser_->startAdvertising(username, fingerprint);
+        if (success) {
+            startLinuxInbox();
+        }
     } else {
         std::cerr << "BlueZ advertiser not initialized" << std::endl;
     }
@@ -439,6 +442,38 @@ bool BluetoothManager::startEchoAdvertising(const std::string& username, const s
     }
     
     return success;
+}
+
+#ifdef __linux__
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
+
+void BluetoothManager::startLinuxInbox() {
+#ifdef __linux__
+    if (inboxRunning_) return;
+    inboxRunning_ = true;
+    inboxThread_ = std::thread([this]() {
+        int s = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (s < 0) { inboxRunning_ = false; return; }
+        struct sockaddr_un addr; memset(&addr, 0, sizeof(addr)); addr.sun_family = AF_UNIX; std::string path = "/tmp/echo_gatt.sock"; strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path)-1);
+        for (int i=0;i<20 && connect(s,(struct sockaddr*)&addr,sizeof(addr))<0;i++) { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }
+        if (connect(s,(struct sockaddr*)&addr,sizeof(addr))<0) { close(s); inboxRunning_ = false; return; }
+        inboxSocket_ = s;
+        std::vector<uint8_t> buf(512);
+        while (inboxRunning_) {
+            ssize_t n = recv(s, buf.data(), buf.size(), 0);
+            if (n <= 0) break;
+            std::vector<uint8_t> data(buf.begin(), buf.begin()+n);
+            if (dataReceivedCallback_) {
+                dataReceivedCallback_("local", data);
+            }
+        }
+        close(s);
+        inboxSocket_ = -1; inboxRunning_ = false;
+    });
+#endif
 }
 
 void BluetoothManager::stopEchoAdvertising() {
@@ -466,6 +501,14 @@ void BluetoothManager::stopEchoAdvertising() {
 
     isAdvertising_ = false;
     std::cout << "Echo advertising stopped" << std::endl;
+
+#ifdef __linux__
+    if (inboxRunning_) {
+        inboxRunning_ = false;
+        if (inboxSocket_ >= 0) { close(inboxSocket_); inboxSocket_ = -1; }
+        if (inboxThread_.joinable()) inboxThread_.join();
+    }
+#endif
 }
 
 bool BluetoothManager::isAdvertising() const {
@@ -487,6 +530,11 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
                 auto characteristics = service.characteristics();
                 for (auto& characteristic : characteristics) {
                     if (characteristic.uuid() == BITCHAT_TX_CHAR_UUID) {
+                        peripheral->write_request(service.uuid(), characteristic.uuid(), data);
+                        std::cout << "[SENT] " << data.size() << " bytes to " << address << std::endl;
+                        return true;
+                    }
+                    if (characteristic.uuid() == BITCHAT_RX_CHAR_UUID && characteristic.can_write_request()) {
                         peripheral->write_request(service.uuid(), characteristic.uuid(), data);
                         std::cout << "[SENT] " << data.size() << " bytes to " << address << std::endl;
                         return true;
