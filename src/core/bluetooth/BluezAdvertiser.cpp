@@ -90,7 +90,7 @@ private:
     
     std::string generatePythonScript(const std::string& deviceName, const std::string& username) {
         std::ostringstream manufacturerData;
-        manufacturerData << "dbus.Array([dbus.Byte(0x11)";
+        manufacturerData << "dbus.Array([dbus.Byte(0xEC), dbus.Byte(0x40)";
         for (unsigned char c : username) {
             manufacturerData << ", dbus.Byte(" << static_cast<int>(c) << ")";
         }

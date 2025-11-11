@@ -45,8 +45,15 @@ void BluetoothManager::initializeAdapter() {
     
     adapter_ = std::make_shared<SimpleBLE::Adapter>(adapters[0]);
     
-    std::cout << "Using Bluetooth adapter: " << adapter_->identifier() 
-              << " (" << adapter_->address() << ")" << std::endl;
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "Bluetooth Adapter Ready" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "Name:    " << adapter_->identifier() << std::endl;
+    std::cout << "Address: " << adapter_->address() << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "\nTo connect from another device, use:" << std::endl;
+    std::cout << "  connect " << adapter_->address() << std::endl;
+    std::cout << "========================================\n" << std::endl;
 }
 
 bool BluetoothManager::isBluetoothAvailable() const {
@@ -216,6 +223,25 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
                 }
             }
         }
+    }
+    
+    try {
+        auto services = mutable_peripheral.services();
+        for (auto& service : services) {
+            std::string serviceUuid = service.uuid();
+            std::transform(serviceUuid.begin(), serviceUuid.end(), serviceUuid.begin(), ::tolower);
+            
+            if (serviceUuid.find("f47b5e2d-4a9e-4c5a-9b3f-8e1d2c3a4b5c") != std::string::npos ||
+                serviceUuid.find("f47b5e2d") != std::string::npos) {
+                
+                device.echoUsername = "Echo-" + device.address.substr(device.address.length() - 8);
+                device.echoFingerprint = "gatt";
+                device.osType = "windows";
+                std::cout << "[Discovery] Echo device by service UUID: " << device.echoUsername << std::endl;
+                return true;
+            }
+        }
+    } catch (const std::exception& e) {
     }
     
     return false;
