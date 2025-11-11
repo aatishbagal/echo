@@ -4,6 +4,7 @@
 #include <chrono>
 #include <mutex>
 #include <vector>
+#include <thread>
 
 namespace echo {
 
@@ -70,6 +71,7 @@ bool BluetoothManager::startScanning() {
         
         std::cout << "Started continuous Bluetooth LE scanning..." << std::endl;
         std::cout << "Looking for BLE devices (this may take 10-15 seconds)..." << std::endl;
+        std::cout << "Echo devices will be automatically connected for messaging" << std::endl;
         return true;
         
     } catch (const std::exception& e) {
@@ -140,6 +142,36 @@ void BluetoothManager::onPeripheralFound(SimpleBLE::Peripheral peripheral) {
         std::cout << "Found Echo device: " << device.echoUsername 
                   << " (" << device.address << ") "
                   << "RSSI: " << device.rssi << " dBm" << std::endl;
+        
+        bool alreadyConnected = false;
+        {
+            std::lock_guard<std::mutex> lock(devicesMutex_);
+            alreadyConnected = (findConnectedPeripheral(device.address) != nullptr);
+        }
+        
+        if (device.isConnectable && !alreadyConnected) {
+            std::cout << "Auto-connecting to " << device.echoUsername << "..." << std::endl;
+            std::thread([this, peripheral]() mutable {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                try {
+                    peripheral.connect();
+                    if (peripheral.is_connected()) {
+                        {
+                            std::lock_guard<std::mutex> lock(devicesMutex_);
+                            connectedPeripherals_.push_back(peripheral);
+                        }
+                        std::cout << "[AUTO-CONNECTED] " << peripheral.identifier() 
+                                 << " ready for messaging" << std::endl;
+                        if (deviceConnectedCallback_) {
+                            deviceConnectedCallback_(peripheral.address());
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "[AUTO-CONNECT FAILED] " << peripheral.identifier() 
+                             << ": " << e.what() << std::endl;
+                }
+            }).detach();
+        }
     } else {
         std::cout << "Found device: " << device.name << " (" << device.address << ")"
                   << " RSSI: " << device.rssi << " dBm" << std::endl;
@@ -171,7 +203,7 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
 
                     if (!decodedUsername.empty()) {
                         device.echoUsername = decodedUsername;
-                        device.osType = (flags & 0x1) ? "windows" : "unknown";
+                        device.osType = (flags & 0x1) ? "windows" : "linux";
                         device.echoFingerprint = "mesh";
                         std::cout << "[Parser] Found Echo device with service data: " << decodedUsername << std::endl;
                         return true;
@@ -198,7 +230,6 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
             }
             
             std::cout << "[Parser] Found Echo service UUID but no name/data" << std::endl;
-            std::cout << "[Parser] Device name: '" << name << "'" << std::endl;
             std::cout << "[Parser] This appears to be a Windows 11 GATT-advertised device" << std::endl;
             
             device.echoUsername = "Win11-" + device.address.substr(0, 8);
@@ -263,14 +294,17 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
                 peripheral.connect();
                 
                 if (peripheral.is_connected()) {
+                    std::lock_guard<std::mutex> lock(devicesMutex_);
                     connectedPeripherals_.push_back(peripheral);
                     
                     peripheral.set_callback_on_connected([this, address]() {
-                        onPeripheralConnected(*findConnectedPeripheral(address));
+                        auto* p = findConnectedPeripheral(address);
+                        if (p) onPeripheralConnected(*p);
                     });
                     
                     peripheral.set_callback_on_disconnected([this, address]() {
-                        onPeripheralDisconnected(*findConnectedPeripheral(address));
+                        auto* p = findConnectedPeripheral(address);
+                        if (p) onPeripheralDisconnected(*p);
                     });
                     
                     std::cout << "Connected to device: " << address << std::endl;
@@ -287,6 +321,7 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
 }
 
 void BluetoothManager::disconnectFromDevice(const std::string& address) {
+    std::lock_guard<std::mutex> lock(devicesMutex_);
     auto* peripheral = findConnectedPeripheral(address);
     if (peripheral && peripheral->is_connected()) {
         peripheral->disconnect();
@@ -407,8 +442,10 @@ bool BluetoothManager::isAdvertising() const {
 }
 
 bool BluetoothManager::sendData(const std::string& address, const std::vector<uint8_t>& data) {
+    std::lock_guard<std::mutex> lock(devicesMutex_);
     auto* peripheral = findConnectedPeripheral(address);
     if (!peripheral || !peripheral->is_connected()) {
+        std::cerr << "[SEND FAILED] Device " << address << " not connected" << std::endl;
         return false;
     }
     
@@ -420,11 +457,14 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
                 for (auto& characteristic : characteristics) {
                     if (characteristic.uuid() == BITCHAT_TX_CHAR_UUID) {
                         peripheral->write_request(service.uuid(), characteristic.uuid(), data);
+                        std::cout << "[SENT] " << data.size() << " bytes to " << address << std::endl;
                         return true;
                     }
                 }
             }
         }
+        
+        std::cerr << "[SEND FAILED] No TX characteristic found for " << address << std::endl;
         
     } catch (const std::exception& e) {
         std::cerr << "Failed to send data to " << address << ": " << e.what() << std::endl;

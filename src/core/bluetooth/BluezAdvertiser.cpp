@@ -24,7 +24,12 @@ public:
         std::string deviceName = "Echo-" + username + "[linux]";
         std::string peerId = fingerprint.substr(0, 16);
         
-        std::string scriptContent = generatePythonScript(deviceName, peerId);
+        std::string truncatedUsername = username;
+        if (truncatedUsername.length() > 20) {
+            truncatedUsername = truncatedUsername.substr(0, 20);
+        }
+        
+        std::string scriptContent = generatePythonScript(deviceName, peerId, truncatedUsername);
         
         std::string scriptPath = "/tmp/echo_advertise.py";
         std::ofstream scriptFile(scriptPath);
@@ -53,7 +58,7 @@ public:
             if (result == 0) {
                 std::cout << "[Linux Advertiser] Started advertising as: " << deviceName << std::endl;
                 std::cout << "[Linux Advertiser] Service UUID: F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C" << std::endl;
-                std::cout << "[Linux Advertiser] Peer ID: " << peerId << std::endl;
+                std::cout << "[Linux Advertiser] Username: " << truncatedUsername << std::endl;
                 std::cout << "[Linux Advertiser] Process PID: " << advertiserPid_ << std::endl;
                 return true;
             } else {
@@ -82,7 +87,12 @@ public:
 private:
     pid_t advertiserPid_;
     
-    std::string generatePythonScript(const std::string& deviceName, const std::string& peerId) {
+    std::string generatePythonScript(const std::string& deviceName, const std::string& peerId, const std::string& username) {
+        std::ostringstream usernameHex;
+        for (unsigned char c : username) {
+            usernameHex << "\\x" << std::hex << std::setw(2) << std::setfill('0') << (int)c;
+        }
+        
         return R"(#!/usr/bin/env python3
 import dbus
 import dbus.exceptions
@@ -106,7 +116,14 @@ class Advertisement(dbus.service.Object):
         self.bus = bus
         self.ad_type = advertising_type
         self.service_uuids = ['F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C']
-        self.manufacturer_data = None
+        
+        self.manufacturer_data = dbus.Dictionary({
+            dbus.UInt16(0xFFFF): dbus.Array([
+                dbus.Byte(0x11),
+)" + "                dbus.Byte(ord(c)) for c in \"" + username + R"(\"
+            ], signature='y')
+        }, signature='qv')
+        
         self.local_name = ')" + deviceName + R"('
         self.include_tx_power = False
         dbus.service.Object.__init__(self, bus, self.path)
@@ -119,7 +136,7 @@ class Advertisement(dbus.service.Object):
         if self.local_name is not None:
             properties['LocalName'] = dbus.String(self.local_name)
         if self.manufacturer_data is not None:
-            properties['ManufacturerData'] = dbus.Dictionary(self.manufacturer_data, signature='qv')
+            properties['ManufacturerData'] = self.manufacturer_data
         if self.include_tx_power:
             properties['IncludeTxPower'] = dbus.Boolean(self.include_tx_power)
         return {LE_ADVERTISEMENT_IFACE: properties}
@@ -227,4 +244,4 @@ void BluezAdvertiser::setAdvertisingInterval(uint16_t minInterval, uint16_t maxI
 
 }
 
-#endif 
+#endif
