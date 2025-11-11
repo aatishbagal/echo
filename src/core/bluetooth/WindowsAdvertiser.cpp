@@ -97,19 +97,34 @@ public:
     
     bool startAdvertising(const std::string& username, const std::string& fingerprint) {
         std::cout << "\n========================================" << std::endl;
-        std::cout << "Starting GATT Server (Windows)" << std::endl;
+        std::cout << "Starting Windows BLE Advertising" << std::endl;
         std::cout << "========================================" << std::endl;
         
-        if (tryGattServerApproach(username, fingerprint)) {
-            std::cout << "\n✓ GATT server is running!" << std::endl;
-            std::cout << "✓ Other devices can connect to you" << std::endl;
-            std::cout << "\nYour Bluetooth address is shown above." << std::endl;
-            std::cout << "Share it with others to let them connect." << std::endl;
+        bool gattSuccess = tryGattServerApproach(username, fingerprint);
+        bool publisherSuccess = tryAdvertiserApproach(username, fingerprint);
+        
+        if (gattSuccess && publisherSuccess) {
+            std::cout << "\nGATT + Publisher both active!" << std::endl;
+            std::cout << "Devices can discover you AND connect via GATT" << std::endl;
             std::cout << "========================================\n" << std::endl;
             return true;
         }
         
-        std::cerr << "\n✗ Failed to start GATT server" << std::endl;
+        if (gattSuccess) {
+            std::cout << "\nGATT server active (discoverable via manual connect)" << std::endl;
+            std::cout << "Publisher failed (devices won't auto-discover)" << std::endl;
+            std::cout << "========================================\n" << std::endl;
+            return true;
+        }
+        
+        if (publisherSuccess) {
+            std::cout << "\nPublisher active (discoverable)" << std::endl;
+            std::cout << "GATT server failed (limited messaging)" << std::endl;
+            std::cout << "========================================\n" << std::endl;
+            return true;
+        }
+        
+        std::cerr << "\nBoth GATT and Publisher failed" << std::endl;
         std::cerr << "Try running as Administrator" << std::endl;
         std::cerr << "========================================\n" << std::endl;
         return false;
@@ -138,7 +153,8 @@ public:
             manufacturerData.CompanyId(0xFFFF);
             
             std::vector<uint8_t> payload;
-            payload.push_back(0x11);
+            payload.push_back(0xEC);
+            payload.push_back(0x40);
             
             std::string truncatedUsername = username;
             if (truncatedUsername.length() > 20) {
