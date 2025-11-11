@@ -96,29 +96,22 @@ public:
     }
     
     bool startAdvertising(const std::string& username, const std::string& fingerprint) {
-        std::cout << "\n[Windows Advertiser] Starting BLE advertising..." << std::endl;
+        std::cout << "\n========================================" << std::endl;
+        std::cout << "Starting GATT Server (Windows)" << std::endl;
+        std::cout << "========================================" << std::endl;
         
-        bool gattStarted = tryGattServerApproach(username, fingerprint);
-        
-        if (tryAdvertiserApproach(username, fingerprint)) {
-            std::cout << "[Windows] Using publisher for discovery + GATT for messaging" << std::endl;
+        if (tryGattServerApproach(username, fingerprint)) {
+            std::cout << "\n✓ GATT server is running!" << std::endl;
+            std::cout << "✓ Other devices can connect to you" << std::endl;
+            std::cout << "\nYour Bluetooth address is shown above." << std::endl;
+            std::cout << "Share it with others to let them connect." << std::endl;
+            std::cout << "========================================\n" << std::endl;
             return true;
         }
         
-        if (gattStarted) {
-            std::cout << "[Windows] WARNING: Using GATT-only mode (devices may not discover each other easily)" << std::endl;
-            std::cout << "[Windows] TIP: Run as Administrator or enable Developer Mode for better discovery" << std::endl;
-            return true;
-        }
-        
-        std::cerr << "\n========================================" << std::endl;
-        std::cerr << "WINDOWS 11 BLE LIMITATION" << std::endl;
-        std::cerr << "========================================" << std::endl;
-        std::cerr << "Quick fixes:" << std::endl;
-        std::cerr << "1. Run as Administrator" << std::endl;
-        std::cerr << "2. Enable Developer Mode in Settings" << std::endl;
+        std::cerr << "\n✗ Failed to start GATT server" << std::endl;
+        std::cerr << "Try running as Administrator" << std::endl;
         std::cerr << "========================================\n" << std::endl;
-        
         return false;
     }
     

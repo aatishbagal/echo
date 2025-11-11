@@ -51,6 +51,7 @@ public:
     std::vector<DiscoveredDevice> getDiscoveredDevices() const;
     std::vector<DiscoveredDevice> getEchoDevices() const;
     bool connectToDevice(const std::string& address);
+    bool connectToDeviceByAddress(const std::string& address); // Manual connection for GATT-only mode
     void disconnectFromDevice(const std::string& address);
     
     bool startBitChatAdvertising();

@@ -78,6 +78,7 @@ void ConsoleUI::printHelp() const {
     std::cout << "stop              - Stop scanning" << std::endl;
     std::cout << "devices           - List all discovered devices" << std::endl;
     std::cout << "echo              - List only Echo devices" << std::endl;
+    std::cout << "connect <addr>    - Connect to device by Bluetooth address" << std::endl;
     std::cout << "/chat @username   - Start personal chat" << std::endl;
     std::cout << "/join #global     - Join global chat" << std::endl;
     std::cout << "/msg @user text   - Send quick message" << std::endl;
@@ -112,6 +113,23 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
         else if (simpleCmd == "stop") cmd.type = CommandType::STOP;
         else if (simpleCmd == "devices") cmd.type = CommandType::DEVICES;
         else if (simpleCmd == "echo") cmd.type = CommandType::ECHO_DEVICES;
+        else if (simpleCmd == "connect") {
+            std::string address;
+            iss >> address;
+            if (!address.empty()) {
+                std::cout << "Connecting to: " << address << std::endl;
+                if (bluetoothManager.connectToDeviceByAddress(address)) {
+                    std::cout << "Connected successfully!" << std::endl;
+                } else {
+                    std::cout << "Connection failed. Make sure device is advertising." << std::endl;
+                }
+            } else {
+                std::cout << "Usage: connect <bluetooth-address>" << std::endl;
+                std::cout << "Example: connect AA:BB:CC:DD:EE:FF" << std::endl;
+            }
+            std::cout << getPrompt();
+            return;
+        }
         else if (simpleCmd == "whoami") cmd.type = CommandType::WHOAMI;
         else if (simpleCmd == "help") cmd.type = CommandType::HELP;
         else if (simpleCmd == "clear" || simpleCmd == "cls") cmd.type = CommandType::CLEAR;

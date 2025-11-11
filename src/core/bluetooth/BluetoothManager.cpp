@@ -55,8 +55,16 @@ void BluetoothManager::initializeAdapter() {
     
     adapter_ = std::make_shared<SimpleBLE::Adapter>(adapters[0]);
     
-    std::cout << "Using Bluetooth adapter: " << adapter_->identifier() 
-              << " (" << adapter_->address() << ")" << std::endl;
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "Bluetooth Adapter Ready" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "Name:    " << adapter_->identifier() << std::endl;
+    std::cout << "Address: " << adapter_->address() << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "\nFor GATT-only mode:" << std::endl;
+    std::cout << "Other devices can connect using:" << std::endl;
+    std::cout << "  connect " << adapter_->address() << std::endl;
+    std::cout << "========================================\n" << std::endl;
 }
 
 bool BluetoothManager::isBluetoothAvailable() const {
@@ -75,9 +83,9 @@ bool BluetoothManager::startScanning() {
         }
         
         adapter_->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
-            std::cout << "[SCAN] Device: " << peripheral.identifier() 
-                     << " | Addr: " << peripheral.address()
-                     << " | RSSI: " << peripheral.rssi() << " dBm" << std::endl;
+            std::cout << "[SCAN] " << peripheral.identifier() 
+                     << " [" << peripheral.address() << "]"
+                     << " (" << peripheral.rssi() << " dBm)" << std::endl;
             onPeripheralFound(std::move(peripheral));
         });
         
@@ -353,6 +361,158 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
     }
     
     return false;
+}
+
+bool BluetoothManager::connectToDeviceByAddress(const std::string& address) {
+    if (!adapter_) {
+        std::cerr << "[Connect] No Bluetooth adapter available" << std::endl;
+        return false;
+    }
+    
+    std::cout << "\n[GATT-Only Mode] Attempting to connect to: " << address << std::endl;
+    std::cout << "[Connect] This will connect directly without prior discovery..." << std::endl;
+    
+    try {
+        // Check if already connected
+        {
+            std::lock_guard<std::mutex> lock(devicesMutex_);
+            for (auto& p : connectedPeripherals_) {
+                if (p.address() == address) {
+                    std::cout << "[Connect] Already connected to this device" << std::endl;
+                    return true;
+                }
+            }
+        }
+        
+        // Stop scanning if active to avoid conflicts
+        bool wasScanning = isScanning_;
+        if (wasScanning) {
+            adapter_->scan_stop();
+        }
+        
+        // Start a fresh scan to find the device
+        std::cout << "[Connect] Scanning for device..." << std::endl;
+        adapter_->scan_for(5000); // 5 second scan
+        
+        auto peripherals = adapter_->scan_get_results();
+        std::cout << "[Connect] Found " << peripherals.size() << " devices in range" << std::endl;
+        
+        SimpleBLE::Peripheral* targetPeripheral = nullptr;
+        for (auto& peripheral : peripherals) {
+            std::cout << "[Connect] Checking: " << peripheral.address() << std::endl;
+            if (peripheral.address() == address) {
+                targetPeripheral = &peripheral;
+                break;
+            }
+        }
+        
+        if (!targetPeripheral) {
+            std::cerr << "[Connect] Device not found at address: " << address << std::endl;
+            std::cerr << "[Connect] Make sure the device is advertising and in range" << std::endl;
+            if (wasScanning) {
+                adapter_->scan_start();
+            }
+            return false;
+        }
+        
+        std::cout << "[Connect] Found device! Connecting..." << std::endl;
+        std::cout << "[Connect] Device name: " << targetPeripheral->identifier() << std::endl;
+        
+        targetPeripheral->connect();
+        
+        if (!targetPeripheral->is_connected()) {
+            std::cerr << "[Connect] Failed to establish connection" << std::endl;
+            if (wasScanning) {
+                adapter_->scan_start();
+            }
+            return false;
+        }
+        
+        std::cout << "[Connect] Connection established! Waiting for GATT services..." << std::endl;
+        
+        // Wait for service discovery
+        bool servicesReady = false;
+        for (int retry = 0; retry < 15; retry++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            
+            try {
+                auto services = targetPeripheral->services();
+                std::cout << "[Connect] Service discovery attempt " << (retry + 1) 
+                         << ": found " << services.size() << " services" << std::endl;
+                
+                // Look for our Echo service
+                bool hasEchoService = false;
+                for (auto& service : services) {
+                    auto svcUuid = service.uuid();
+                    std::cout << "[Connect]   - Service UUID: " << svcUuid << std::endl;
+                    if (svcUuid.find(BITCHAT_SERVICE_UUID) != std::string::npos ||
+                        svcUuid.find("f47b5e2d") != std::string::npos) {
+                        hasEchoService = true;
+                        std::cout << "[Connect]   ✓ Found Echo GATT service!" << std::endl;
+                        
+                        auto chars = service.characteristics();
+                        for (auto& ch : chars) {
+                            std::cout << "[Connect]     - Characteristic: " << ch.uuid() << std::endl;
+                        }
+                    }
+                }
+                
+                if (services.size() > 0) {
+                    servicesReady = true;
+                    if (!hasEchoService) {
+                        std::cout << "[Connect] WARNING: Device doesn't have Echo GATT service" << std::endl;
+                        std::cout << "[Connect] This might not be an Echo device" << std::endl;
+                    }
+                    break;
+                }
+            } catch (const std::exception& e) {
+                if (retry == 14) {
+                    std::cerr << "[Connect] Service discovery failed: " << e.what() << std::endl;
+                    targetPeripheral->disconnect();
+                    if (wasScanning) {
+                        adapter_->scan_start();
+                    }
+                    return false;
+                }
+            }
+        }
+        
+        if (!servicesReady) {
+            std::cerr << "[Connect] Service discovery timed out" << std::endl;
+            targetPeripheral->disconnect();
+            if (wasScanning) {
+                adapter_->scan_start();
+            }
+            return false;
+        }
+        
+        // Add to connected list
+        {
+            std::lock_guard<std::mutex> lock(devicesMutex_);
+            connectedPeripherals_.push_back(*targetPeripheral);
+        }
+        
+        // Setup notifications
+        setupCharacteristicNotifications(*targetPeripheral);
+        
+        std::cout << "\n[Connect] ✓ Successfully connected to: " << address << std::endl;
+        std::cout << "[Connect] You can now send messages to this device!" << std::endl;
+        
+        if (deviceConnectedCallback_) {
+            deviceConnectedCallback_(address);
+        }
+        
+        // Resume scanning if it was active
+        if (wasScanning) {
+            adapter_->scan_start();
+        }
+        
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[Connect] Connection failed: " << e.what() << std::endl;
+        return false;
+    }
 }
 
 void BluetoothManager::disconnectFromDevice(const std::string& address) {
