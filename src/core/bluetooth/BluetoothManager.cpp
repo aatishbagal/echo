@@ -298,13 +298,30 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
                 if (peripheral.is_connected()) {
                     std::cout << "Connection established, waiting for services..." << std::endl;
                     
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    // Windows needs longer time for service discovery
+                    bool servicesReady = false;
+                    for (int retry = 0; retry < 10; retry++) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                        
+                        try {
+                            auto services = peripheral.services();
+                            if (services.size() > 0) {
+                                std::cout << "Found " << services.size() << " services (retry " << retry << ")" << std::endl;
+                                servicesReady = true;
+                                break;
+                            }
+                        } catch (const std::exception& e) {
+                            if (retry == 9) {
+                                std::cerr << "Service discovery failed after retries: " << e.what() << std::endl;
+                                peripheral.disconnect();
+                                return false;
+                            }
+                            // Continue retrying
+                        }
+                    }
                     
-                    try {
-                        auto services = peripheral.services();
-                        std::cout << "Found " << services.size() << " services" << std::endl;
-                    } catch (const std::exception& e) {
-                        std::cerr << "Service discovery failed: " << e.what() << std::endl;
+                    if (!servicesReady) {
+                        std::cerr << "Service discovery timed out" << std::endl;
                         peripheral.disconnect();
                         return false;
                     }
@@ -462,31 +479,40 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
         auto* peripheral = findConnectedPeripheral(address);
         
         if (peripheral && peripheral->is_connected()) {
-            try {
-                std::cout << "[SEND] Accessing services for " << address << std::endl;
-                auto services = peripheral->services();
-                std::cout << "[SEND] Found " << services.size() << " services" << std::endl;
-                
-                for (auto& service : services) {
-                    if (service.uuid() == BITCHAT_SERVICE_UUID) {
-                        auto characteristics = service.characteristics();
-                        for (auto& characteristic : characteristics) {
-                            if (characteristic.uuid() == BITCHAT_TX_CHAR_UUID) {
-                                peripheral->write_request(service.uuid(), characteristic.uuid(), data);
-                                std::cout << "[SENT] " << data.size() << " bytes to " << address << std::endl;
-                                return true;
+            // Retry logic for Windows service access timing
+            for (int retry = 0; retry < 5; retry++) {
+                try {
+                    std::cout << "[SEND] Accessing services for " << address << " (attempt " << (retry+1) << ")" << std::endl;
+                    auto services = peripheral->services();
+                    std::cout << "[SEND] Found " << services.size() << " services" << std::endl;
+                    
+                    for (auto& service : services) {
+                        if (service.uuid() == BITCHAT_SERVICE_UUID) {
+                            auto characteristics = service.characteristics();
+                            for (auto& characteristic : characteristics) {
+                                if (characteristic.uuid() == BITCHAT_TX_CHAR_UUID) {
+                                    peripheral->write_request(service.uuid(), characteristic.uuid(), data);
+                                    std::cout << "[SENT] " << data.size() << " bytes to " << address << std::endl;
+                                    return true;
+                                }
                             }
                         }
                     }
+                    
+                    std::cerr << "[SEND FAILED] No TX characteristic found for " << address << std::endl;
+                    return false;
+                    
+                } catch (const std::exception& e) {
+                    std::cerr << "[SEND] Error accessing device " << address << " (attempt " << (retry+1) << "): " << e.what() << std::endl;
+                    
+                    if (retry < 4) {
+                        std::cout << "[SEND] Retrying after 500ms..." << std::endl;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    } else {
+                        std::cerr << "[SEND] All retry attempts failed" << std::endl;
+                        return false;
+                    }
                 }
-                
-                std::cerr << "[SEND FAILED] No TX characteristic found for " << address << std::endl;
-                return false;
-                
-            } catch (const std::exception& e) {
-                std::cerr << "[SEND] Error accessing device " << address << ": " << e.what() << std::endl;
-                std::cerr << "[SEND] Device may not be ready, services may not be discovered" << std::endl;
-                return false;
             }
         }
     }
