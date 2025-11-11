@@ -459,8 +459,13 @@ void BluetoothManager::startLinuxInbox() {
         int s = socket(AF_UNIX, SOCK_STREAM, 0);
         if (s < 0) { inboxRunning_ = false; return; }
         struct sockaddr_un addr; memset(&addr, 0, sizeof(addr)); addr.sun_family = AF_UNIX; std::string path = "/tmp/echo_gatt.sock"; strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path)-1);
-        for (int i=0;i<20 && connect(s,(struct sockaddr*)&addr,sizeof(addr))<0;i++) { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }
-        if (connect(s,(struct sockaddr*)&addr,sizeof(addr))<0) { close(s); inboxRunning_ = false; return; }
+        int rc = -1;
+        for (int i=0;i<20; i++) {
+            rc = connect(s,(struct sockaddr*)&addr,sizeof(addr));
+            if (rc == 0) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        if (rc < 0) { close(s); inboxRunning_ = false; return; }
         inboxSocket_ = s;
         std::vector<uint8_t> buf(512);
         while (inboxRunning_) {
