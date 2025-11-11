@@ -98,12 +98,16 @@ public:
     bool startAdvertising(const std::string& username, const std::string& fingerprint) {
         std::cout << "\n[Windows Advertiser] Starting BLE advertising..." << std::endl;
         
+        bool gattStarted = tryGattServerApproach(username, fingerprint);
+        
         if (tryAdvertiserApproach(username, fingerprint)) {
+            std::cout << "[Windows] Using publisher for discovery + GATT for messaging" << std::endl;
             return true;
         }
         
-        std::cout << "\n[Windows Advertiser] Falling back to GATT service..." << std::endl;
-        if (tryGattServerApproach(username, fingerprint)) {
+        if (gattStarted) {
+            std::cout << "[Windows] WARNING: Using GATT-only mode (devices may not discover each other easily)" << std::endl;
+            std::cout << "[Windows] TIP: Run as Administrator or enable Developer Mode for better discovery" << std::endl;
             return true;
         }
         
