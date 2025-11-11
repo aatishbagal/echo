@@ -113,6 +113,9 @@ void BluetoothManager::onPeripheralFound(SimpleBLE::Peripheral peripheral) {
     device.lastSeen = std::chrono::steady_clock::now();
     device.isEchoDevice = false;
     
+    std::cout << "\n[SCAN] Found device: " << device.name << " (" << device.address << ")" << std::endl;
+    std::cout << "[SCAN] RSSI: " << device.rssi << " dBm, Connectable: " << (device.isConnectable ? "yes" : "no") << std::endl;
+    
     device.isEchoDevice = parseEchoDevice(peripheral, device);
     
     {
@@ -185,29 +188,39 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
     std::string parsedUsername;
     std::string parsedOS;
     
+    std::cout << "[Parser] Analyzing device: " << device.address << std::endl;
+    
     auto mfgData = mutable_peripheral.manufacturer_data();
+    std::cout << "[Parser] Found " << mfgData.size() << " manufacturer data entries" << std::endl;
     for (const auto& [companyId, data] : mfgData) {
+        std::cout << "[Parser]   Company ID: 0x" << std::hex << companyId << std::dec 
+                  << " (" << data.size() << " bytes)" << std::endl;
         if (companyId == 0xFFFF && !data.empty()) {
+            std::cout << "[Parser]   Header byte: 0x" << std::hex << (int)data[0] << std::dec << std::endl;
             if (data[0] == 0x11) {
                 if (data.size() > 1) {
                     parsedUsername = std::string(data.begin() + 1, data.end());
                     parsedOS = "unknown";
-                    std::cout << "[Parser] Found Echo manufacturer data with username: " << parsedUsername << std::endl;
+                    std::cout << "[Parser] SUCCESS: Found Echo manufacturer data with username: " << parsedUsername << std::endl;
                 }
             }
         }
     }
     
     auto services = mutable_peripheral.services();
+    std::cout << "[Parser] Found " << services.size() << " services" << std::endl;
     for (auto& service : services) {
         std::string serviceUuid = service.uuid();
+        std::cout << "[Parser]   Service UUID: " << serviceUuid << std::endl;
         std::transform(serviceUuid.begin(), serviceUuid.end(), serviceUuid.begin(), ::toupper);
         
         if (serviceUuid.find("F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C") != std::string::npos ||
             serviceUuid.find("F47B5E2D") != std::string::npos) {
             hasEchoService = true;
+            std::cout << "[Parser] MATCH: Found Echo service UUID!" << std::endl;
             
             auto rawServiceData = static_cast<std::vector<uint8_t>>(service.data());
+            std::cout << "[Parser] Service data size: " << rawServiceData.size() << " bytes" << std::endl;
             if (!rawServiceData.empty() && parsedUsername.empty()) {
                 uint8_t header = rawServiceData[0];
                 uint8_t version = header >> 4;
@@ -216,7 +229,7 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
                 if (version == 1 && rawServiceData.size() > 1) {
                     parsedUsername = std::string(rawServiceData.begin() + 1, rawServiceData.end());
                     parsedOS = (flags & 0x1) ? "windows" : "linux";
-                    std::cout << "[Parser] Found Echo service data with username: " << parsedUsername << std::endl;
+                    std::cout << "[Parser] SUCCESS: Found Echo service data with username: " << parsedUsername << std::endl;
                 }
             }
             break;
@@ -224,6 +237,7 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
     }
     
     std::string name = mutable_peripheral.identifier();
+    std::cout << "[Parser] Device name: \"" << name << "\"" << std::endl;
     if (name.find("Echo-") == 0 && parsedUsername.empty()) {
         size_t osStart = name.rfind('[');
         size_t osEnd = name.rfind(']');
@@ -235,7 +249,7 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
             parsedUsername = name.substr(5);
             parsedOS = "unknown";
         }
-        std::cout << "[Parser] Parsed Echo username from device name: " << parsedUsername << std::endl;
+        std::cout << "[Parser] SUCCESS: Parsed Echo username from device name: " << parsedUsername << std::endl;
     }
     
     if (hasEchoService || name.find("Echo-") == 0 || !parsedUsername.empty()) {
@@ -244,11 +258,13 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
         device.osType = parsedOS.empty() ? "unknown" : parsedOS;
         device.echoFingerprint = parsedUsername.empty() ? "gatt-only" : "detected";
         
-        std::cout << "[Parser] Echo device identified: " << device.echoUsername 
-                  << " (" << device.osType << ")" << std::endl;
+        std::cout << "[Parser] *** ECHO DEVICE CONFIRMED ***" << std::endl;
+        std::cout << "[Parser] Username: " << device.echoUsername << std::endl;
+        std::cout << "[Parser] OS: " << device.osType << std::endl;
         return true;
     }
     
+    std::cout << "[Parser] Not an Echo device" << std::endl;
     return false;
 }
 

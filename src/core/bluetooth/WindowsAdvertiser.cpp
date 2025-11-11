@@ -158,32 +158,64 @@ public:
             
             advertisement.ManufacturerData().Append(manufacturerData);
             
+            advertisement.Flags(BluetoothLEAdvertisementFlags::GeneralDiscoverableMode |
+                               BluetoothLEAdvertisementFlags::ClassicNotSupported);
+            
             publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender,
                                             BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
                 onStatusChanged(sender, args);
             });
             
+            std::cout << "[Windows Advertiser] Starting publisher..." << std::endl;
             publisher_.Start();
             
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             
             auto status = publisher_.Status();
+            std::cout << "[Windows Advertiser] Publisher status: " << (int)status << std::endl;
+            
             if (status == BluetoothLEAdvertisementPublisherStatus::Started) {
-                std::cout << "[Windows Advertiser] Advertisement started successfully!" << std::endl;
+                std::cout << "[Windows Advertiser] SUCCESS: Advertisement active!" << std::endl;
                 std::cout << "[Windows Advertiser] Broadcasting as: " << localName << std::endl;
                 std::cout << "[Windows Advertiser] Service UUID: " << ECHO_SERVICE_UUID << std::endl;
                 std::cout << "[Windows Advertiser] Username in manufacturer data: " << truncatedUsername << std::endl;
+                std::cout << "[Windows Advertiser] Other Windows devices should now see you" << std::endl;
                 return true;
+            } else if (status == BluetoothLEAdvertisementPublisherStatus::Waiting) {
+                std::cout << "[Windows Advertiser] Status: Waiting (checking again in 2 seconds)..." << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+                status = publisher_.Status();
+                if (status == BluetoothLEAdvertisementPublisherStatus::Started) {
+                    std::cout << "[Windows Advertiser] SUCCESS: Advertisement active after wait!" << std::endl;
+                    return true;
+                }
+                std::cerr << "[Windows Advertiser] FAILED: Still waiting after 2 seconds" << std::endl;
+            } else if (status == BluetoothLEAdvertisementPublisherStatus::Aborted) {
+                std::cerr << "[Windows Advertiser] FAILED: Advertisement aborted" << std::endl;
+                std::cerr << "[Windows Advertiser] This usually means:" << std::endl;
+                std::cerr << "[Windows Advertiser]   1. Bluetooth adapter doesn't support peripheral mode" << std::endl;
+                std::cerr << "[Windows Advertiser]   2. Need to run as Administrator" << std::endl;
+                std::cerr << "[Windows Advertiser]   3. Bluetooth radio is off or busy" << std::endl;
             } else {
-                std::cerr << "[Windows Advertiser] Advertisement failed to start (Status: " << (int)status << ")" << std::endl;
-                publisher_ = nullptr;
-                return false;
+                std::cerr << "[Windows Advertiser] FAILED: Unknown status " << (int)status << std::endl;
             }
             
+            publisher_.Stop();
+            publisher_ = nullptr;
+            return false;
+            
         } catch (const winrt::hresult_error& e) {
-            std::cerr << "[Windows Advertiser] Exception (HRESULT: 0x" 
+            std::cerr << "[Windows Advertiser] EXCEPTION (HRESULT: 0x" 
                      << std::hex << e.code() << std::dec << "): " 
                      << winrt::to_string(e.message()) << std::endl;
+            
+            if (e.code() == 0x8007000E) {
+                std::cerr << "[Windows Advertiser] ERROR: Out of memory / Resources unavailable" << std::endl;
+            } else if (e.code() == 0x80070490) {
+                std::cerr << "[Windows Advertiser] ERROR: Element not found (driver issue?)" << std::endl;
+            } else if (e.code() == 0x80004005) {
+                std::cerr << "[Windows Advertiser] ERROR: Unspecified error (permissions?)" << std::endl;
+            }
             
             if (publisher_) {
                 try { publisher_.Stop(); } catch(...) {}
@@ -191,7 +223,7 @@ public:
             }
             return false;
         } catch (...) {
-            std::cerr << "[Windows Advertiser] Unknown exception" << std::endl;
+            std::cerr << "[Windows Advertiser] EXCEPTION: Unknown error" << std::endl;
             if (publisher_) {
                 try { publisher_.Stop(); } catch(...) {}
                 publisher_ = nullptr;
