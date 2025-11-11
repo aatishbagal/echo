@@ -181,6 +181,23 @@ void BluetoothManager::onPeripheralFound(SimpleBLE::Peripheral peripheral) {
 bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, DiscoveredDevice& device) {
     auto& mutable_peripheral = const_cast<SimpleBLE::Peripheral&>(peripheral);
     
+    bool hasEchoService = false;
+    std::string parsedUsername;
+    std::string parsedOS;
+    
+    auto mfgData = mutable_peripheral.manufacturer_data();
+    for (const auto& [companyId, data] : mfgData) {
+        if (companyId == 0xFFFF && !data.empty()) {
+            if (data[0] == 0x11) {
+                if (data.size() > 1) {
+                    parsedUsername = std::string(data.begin() + 1, data.end());
+                    parsedOS = "unknown";
+                    std::cout << "[Parser] Found Echo manufacturer data with username: " << parsedUsername << std::endl;
+                }
+            }
+        }
+    }
+    
     auto services = mutable_peripheral.services();
     for (auto& service : services) {
         std::string serviceUuid = service.uuid();
@@ -188,65 +205,47 @@ bool BluetoothManager::parseEchoDevice(const SimpleBLE::Peripheral& peripheral, 
         
         if (serviceUuid.find("F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C") != std::string::npos ||
             serviceUuid.find("F47B5E2D") != std::string::npos) {
+            hasEchoService = true;
             
             auto rawServiceData = static_cast<std::vector<uint8_t>>(service.data());
-            if (!rawServiceData.empty()) {
+            if (!rawServiceData.empty() && parsedUsername.empty()) {
                 uint8_t header = rawServiceData[0];
                 uint8_t version = header >> 4;
                 uint8_t flags = header & 0x0F;
 
-                if (version == 1) {
-                    std::string decodedUsername;
-                    if (rawServiceData.size() > 1) {
-                        decodedUsername.assign(rawServiceData.begin() + 1, rawServiceData.end());
-                    }
-
-                    if (!decodedUsername.empty()) {
-                        device.echoUsername = decodedUsername;
-                        device.osType = (flags & 0x1) ? "windows" : "linux";
-                        device.echoFingerprint = "mesh";
-                        std::cout << "[Parser] Found Echo device with service data: " << decodedUsername << std::endl;
-                        return true;
-                    }
+                if (version == 1 && rawServiceData.size() > 1) {
+                    parsedUsername = std::string(rawServiceData.begin() + 1, rawServiceData.end());
+                    parsedOS = (flags & 0x1) ? "windows" : "linux";
+                    std::cout << "[Parser] Found Echo service data with username: " << parsedUsername << std::endl;
                 }
             }
-            
-            std::string name = mutable_peripheral.identifier();
-            
-            if (name.find("Echo-") == 0) {
-                size_t osStart = name.rfind('[');
-                size_t osEnd = name.rfind(']');
-                
-                if (osStart != std::string::npos && osEnd != std::string::npos && osEnd > osStart) {
-                    device.osType = name.substr(osStart + 1, osEnd - osStart - 1);
-                    device.echoUsername = name.substr(5, osStart - 5);
-                } else {
-                    device.echoUsername = name.substr(5);
-                    device.osType = "unknown";
-                }
-                device.echoFingerprint = "gatt";
-                std::cout << "[Parser] Found Echo device by name: " << device.echoUsername << std::endl;
-                return true;
-            }
-            
-            std::cout << "[Parser] Found Echo service UUID but no name/data" << std::endl;
-            std::cout << "[Parser] This appears to be a Windows 11 GATT-advertised device" << std::endl;
-            
-            device.echoUsername = "Win11-" + device.address.substr(0, 8);
-            device.echoFingerprint = "gatt-win11";
-            device.osType = "windows11";
-            
-            std::cout << "[Parser] Assigned temporary username: " << device.echoUsername << std::endl;
-            return true;
+            break;
         }
     }
     
     std::string name = mutable_peripheral.identifier();
-    if (name.find("Echo-") == 0) {
-        device.echoUsername = name.substr(5);
-        device.echoFingerprint = "detected";
-        device.osType = "unknown";
-        std::cout << "[Parser] Found Echo device by name only: " << device.echoUsername << std::endl;
+    if (name.find("Echo-") == 0 && parsedUsername.empty()) {
+        size_t osStart = name.rfind('[');
+        size_t osEnd = name.rfind(']');
+        
+        if (osStart != std::string::npos && osEnd != std::string::npos && osEnd > osStart) {
+            parsedOS = name.substr(osStart + 1, osEnd - osStart - 1);
+            parsedUsername = name.substr(5, osStart - 5);
+        } else {
+            parsedUsername = name.substr(5);
+            parsedOS = "unknown";
+        }
+        std::cout << "[Parser] Parsed Echo username from device name: " << parsedUsername << std::endl;
+    }
+    
+    if (hasEchoService || name.find("Echo-") == 0 || !parsedUsername.empty()) {
+        device.isEchoDevice = true;
+        device.echoUsername = parsedUsername.empty() ? ("Unknown-" + device.address.substr(0, 8)) : parsedUsername;
+        device.osType = parsedOS.empty() ? "unknown" : parsedOS;
+        device.echoFingerprint = parsedUsername.empty() ? "gatt-only" : "detected";
+        
+        std::cout << "[Parser] Echo device identified: " << device.echoUsername 
+                  << " (" << device.osType << ")" << std::endl;
         return true;
     }
     

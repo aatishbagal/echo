@@ -96,8 +96,13 @@ public:
     }
     
     bool startAdvertising(const std::string& username, const std::string& fingerprint) {
-        std::cout << "\n[Windows Advertiser] Starting GATT service..." << std::endl;
+        std::cout << "\n[Windows Advertiser] Starting BLE advertising..." << std::endl;
         
+        if (tryAdvertiserApproach(username, fingerprint)) {
+            return true;
+        }
+        
+        std::cout << "\n[Windows Advertiser] Falling back to GATT service..." << std::endl;
         if (tryGattServerApproach(username, fingerprint)) {
             return true;
         }
@@ -111,6 +116,88 @@ public:
         std::cerr << "========================================\n" << std::endl;
         
         return false;
+    }
+    
+    bool tryAdvertiserApproach(const std::string& username, const std::string& fingerprint) {
+        try {
+            std::cout << "[Windows Advertiser] Trying BluetoothLEAdvertisementPublisher..." << std::endl;
+            
+            publisher_ = BluetoothLEAdvertisementPublisher();
+            
+            auto advertisement = publisher_.Advertisement();
+            
+            winrt::guid serviceGuid(0xF47B5E2D, 0x4A9E, 0x4C5A,
+                { 0x9B, 0x3F, 0x8E, 0x1D, 0x2C, 0x3A, 0x4B, 0x5C });
+            
+            advertisement.ServiceUuids().Append(serviceGuid);
+            
+            std::string localName = "Echo-" + username + "[win]";
+            if (localName.length() > 20) {
+                localName = "Echo-" + username.substr(0, 11) + "[win]";
+            }
+            advertisement.LocalName(winrt::to_hstring(localName));
+            
+            auto manufacturerData = BluetoothLEManufacturerData();
+            manufacturerData.CompanyId(0xFFFF);
+            
+            std::vector<uint8_t> payload;
+            payload.push_back(0x11);
+            
+            std::string truncatedUsername = username;
+            if (truncatedUsername.length() > 20) {
+                truncatedUsername = truncatedUsername.substr(0, 20);
+            }
+            
+            for (char c : truncatedUsername) {
+                payload.push_back(static_cast<uint8_t>(c));
+            }
+            
+            auto dataWriter = DataWriter();
+            dataWriter.WriteBytes(payload);
+            manufacturerData.Data(dataWriter.DetachBuffer());
+            
+            advertisement.ManufacturerData().Append(manufacturerData);
+            
+            publisher_.StatusChanged([this](BluetoothLEAdvertisementPublisher const& sender,
+                                            BluetoothLEAdvertisementPublisherStatusChangedEventArgs const& args) {
+                onStatusChanged(sender, args);
+            });
+            
+            publisher_.Start();
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            
+            auto status = publisher_.Status();
+            if (status == BluetoothLEAdvertisementPublisherStatus::Started) {
+                std::cout << "[Windows Advertiser] Advertisement started successfully!" << std::endl;
+                std::cout << "[Windows Advertiser] Broadcasting as: " << localName << std::endl;
+                std::cout << "[Windows Advertiser] Service UUID: " << ECHO_SERVICE_UUID << std::endl;
+                std::cout << "[Windows Advertiser] Username in manufacturer data: " << truncatedUsername << std::endl;
+                return true;
+            } else {
+                std::cerr << "[Windows Advertiser] Advertisement failed to start (Status: " << (int)status << ")" << std::endl;
+                publisher_ = nullptr;
+                return false;
+            }
+            
+        } catch (const winrt::hresult_error& e) {
+            std::cerr << "[Windows Advertiser] Exception (HRESULT: 0x" 
+                     << std::hex << e.code() << std::dec << "): " 
+                     << winrt::to_string(e.message()) << std::endl;
+            
+            if (publisher_) {
+                try { publisher_.Stop(); } catch(...) {}
+                publisher_ = nullptr;
+            }
+            return false;
+        } catch (...) {
+            std::cerr << "[Windows Advertiser] Unknown exception" << std::endl;
+            if (publisher_) {
+                try { publisher_.Stop(); } catch(...) {}
+                publisher_ = nullptr;
+            }
+            return false;
+        }
     }
     
     bool tryGattServerApproach(const std::string& username, const std::string& fingerprint) {
@@ -140,7 +227,8 @@ public:
             std::cout << "[Windows GATT] GATT service started!" << std::endl;
             std::cout << "[Windows GATT] Service UUID: " << ECHO_SERVICE_UUID << std::endl;
             std::cout << "[Windows GATT] Device is now discoverable" << std::endl;
-            std::cout << "[Windows GATT] Note: Messaging requires GATT characteristics (not yet implemented)" << std::endl;
+            std::cout << "[Windows GATT] WARNING: Username not in advertisement (Windows limitation)" << std::endl;
+            std::cout << "[Windows GATT] Other devices will see generic identifier" << std::endl;
             
             return true;
             
@@ -189,13 +277,17 @@ public:
         if (publisher_) {
             try {
                 publisher_.Stop();
+                std::cout << "[Windows Advertiser] Stopped advertising" << std::endl;
             } catch (...) {}
             publisher_ = nullptr;
         }
     }
     
     bool isAdvertising() const {
-        return gattServiceProvider_ != nullptr || publisher_ != nullptr;
+        bool gattActive = gattServiceProvider_ != nullptr;
+        bool publisherActive = publisher_ != nullptr && 
+                              publisher_.Status() == BluetoothLEAdvertisementPublisherStatus::Started;
+        return gattActive || publisherActive;
     }
     
 private:

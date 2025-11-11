@@ -59,7 +59,7 @@ public:
             if (result == 0) {
                 std::cout << "[Linux Advertiser] Started advertising as: " << deviceName << std::endl;
                 std::cout << "[Linux Advertiser] Service UUID: F47B5E2D-4A9E-4C5A-9B3F-8E1D2C3A4B5C" << std::endl;
-                std::cout << "[Linux Advertiser] Username: " << truncatedUsername << std::endl;
+                std::cout << "[Linux Advertiser] Username in manufacturer data: " << truncatedUsername << std::endl;
                 std::cout << "[Linux Advertiser] Process PID: " << advertiserPid_ << std::endl;
                 return true;
             } else {
