@@ -16,12 +16,14 @@ enum class MessageType : uint8_t {
     ACK = 0x05,
     PING = 0x06,
     PONG = 0x07,
-    FILE_REQUEST = 0x08,
-    FILE_DATA = 0x09,
-    USER_STATUS = 0x0A,
-    CHANNEL_JOIN = 0x0B,
-    CHANNEL_LEAVE = 0x0C,
-    PRIVATE_MESSAGE = 0x0D
+    FILE_START = 0x08,
+    FILE_CHUNK = 0x09,
+    FILE_END = 0x0A,
+    FILE_REQUEST = 0x0B,
+    USER_STATUS = 0x0C,
+    CHANNEL_JOIN = 0x0D,
+    CHANNEL_LEAVE = 0x0E,
+    PRIVATE_MESSAGE = 0x0F
 };
 
 enum class ChatMode {
@@ -66,6 +68,36 @@ struct AnnounceMessage {
     static AnnounceMessage deserialize(const std::vector<uint8_t>& data);
 };
 
+struct FileStartMessage {
+    std::string filename;
+    uint32_t fileSize;
+    uint32_t transferId;
+    uint16_t totalChunks;
+    std::string senderUsername;
+    std::string recipientUsername;
+    
+    std::vector<uint8_t> serialize() const;
+    static FileStartMessage deserialize(const std::vector<uint8_t>& data);
+};
+
+struct FileChunkMessage {
+    uint32_t transferId;
+    uint16_t chunkIndex;
+    std::vector<uint8_t> data;
+    
+    std::vector<uint8_t> serialize() const;
+    static FileChunkMessage deserialize(const std::vector<uint8_t>& data);
+};
+
+struct FileEndMessage {
+    uint32_t transferId;
+    uint16_t totalChunks;
+    std::vector<uint8_t> checksum;
+    
+    std::vector<uint8_t> serialize() const;
+    static FileEndMessage deserialize(const std::vector<uint8_t>& data);
+};
+
 struct Message {
     MessageHeader header;
     std::vector<uint8_t> payload;
@@ -89,13 +121,29 @@ public:
                                         const std::string& fingerprint,
                                         const std::string& osType);
     
+    static Message createFileStartMessage(const std::string& filename,
+                                         uint32_t fileSize,
+                                         uint16_t totalChunks,
+                                         const std::string& senderUsername,
+                                         const std::string& recipientUsername);
+    
+    static Message createFileChunkMessage(uint32_t transferId,
+                                         uint16_t chunkIndex,
+                                         const std::vector<uint8_t>& data);
+    
+    static Message createFileEndMessage(uint32_t transferId,
+                                       uint16_t totalChunks,
+                                       const std::vector<uint8_t>& checksum);
+    
     static Message createPingMessage();
     static Message createPongMessage();
     
     static uint32_t generateMessageId();
+    static uint32_t generateTransferId();
     
 private:
     static std::atomic<uint32_t> messageIdCounter_;
+    static std::atomic<uint32_t> transferIdCounter_;
 };
 
 } // namespace echo

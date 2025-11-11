@@ -7,6 +7,8 @@
 
 #include "core/bluetooth/BluetoothManager.h"
 #include "core/crypto/UserIdentity.h"
+#include "core/mesh/MeshNetwork.h"
+#include "core/protocol/MessageTypes.h"
 #include "ui/ConsoleUI.h"
 
 int main(int argc, char* argv[]) {
@@ -47,8 +49,46 @@ int main(int argc, char* argv[]) {
         // Initialize Bluetooth manager
         auto bluetoothManager = std::make_unique<echo::BluetoothManager>();
         
+        // Initialize mesh network
+        auto meshNetwork = std::make_shared<echo::MeshNetwork>();
+        meshNetwork->setLocalUsername(identity.getUsername());
+        meshNetwork->setLocalFingerprint(identity.getFingerprint());
+        
         // Initialize console UI
         auto consoleUI = std::make_unique<echo::ConsoleUI>();
+        
+        // Wire up mesh network callbacks
+        meshNetwork->setMessageCallback([&consoleUI](const echo::Message& msg, const std::string& sourceAddress) {
+            std::cout << "\n[Mesh] Received message type " << static_cast<int>(msg.header.type) 
+                     << " from " << sourceAddress << std::endl;
+            
+            if (msg.header.type == echo::MessageType::GLOBAL_MESSAGE ||
+                msg.header.type == echo::MessageType::PRIVATE_MESSAGE ||
+                msg.header.type == echo::MessageType::TEXT_MESSAGE) {
+                try {
+                    auto textMsg = echo::TextMessage::deserialize(msg.payload);
+                    std::cout << "[" << textMsg.senderUsername << "]: " << textMsg.content << std::endl;
+                } catch (const std::exception& e) {
+                    std::cerr << "[Mesh] Failed to parse text message: " << e.what() << std::endl;
+                }
+            }
+        });
+        
+        bluetoothManager->setMeshNetwork(meshNetwork);
+        
+        bluetoothManager->setDeviceDiscoveredCallback([&meshNetwork](const echo::DiscoveredDevice& device) {
+            if (device.isEchoDevice) {
+                meshNetwork->addPeer(device.address, device.echoUsername);
+            }
+        });
+        
+        bluetoothManager->setDeviceConnectedCallback([&meshNetwork](const std::string& address) {
+            std::cout << "[Mesh] Peer connected: " << address << std::endl;
+        });
+        
+        bluetoothManager->setDeviceDisconnectedCallback([&meshNetwork](const std::string& address) {
+            meshNetwork->removePeer(address);
+        });
         
         // Check if Bluetooth is available
         if (!bluetoothManager->isBluetoothAvailable()) {
@@ -57,6 +97,14 @@ int main(int argc, char* argv[]) {
         }
         
         std::cout << "Bluetooth initialized successfully" << std::endl;
+        
+        std::thread cleanupThread([&meshNetwork]() {
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::seconds(60));
+                meshNetwork->cleanupOldMessages();
+            }
+        });
+        cleanupThread.detach();
         
         // Start advertising Echo presence
         std::cout << "\nStarting Echo advertising..." << std::endl;

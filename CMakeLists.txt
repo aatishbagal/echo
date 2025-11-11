@@ -70,6 +70,8 @@ set(SOURCES
     src/core/crypto/UserIdentity.cpp
     src/core/protocol/MessageTypes.cpp
     src/core/protocol/CompressedMessage.cpp
+    src/core/protocol/FileTransfer.cpp
+    src/core/mesh/MeshNetwork.cpp
     src/core/commands/IRCParser.cpp
     src/ui/ConsoleUI.cpp
 )
@@ -116,12 +118,15 @@ elseif(WIN32)
     )
     
     if(DEFINED VCPKG_TARGET_TRIPLET)
-        find_package(unofficial-sodium CONFIG REQUIRED)
-        find_package(lz4 CONFIG REQUIRED)
-        target_link_libraries(echo
-            unofficial-sodium::sodium
-            lz4::lz4
-        )
+        find_package(unofficial-sodium CONFIG QUIET)
+        if(unofficial-sodium_FOUND)
+            target_link_libraries(echo unofficial-sodium::sodium)
+        endif()
+        
+        find_package(lz4 CONFIG QUIET)
+        if(lz4_FOUND)
+            target_link_libraries(echo lz4::lz4)
+        endif()
     endif()
 elseif(APPLE)
     target_link_libraries(echo

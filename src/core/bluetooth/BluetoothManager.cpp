@@ -1,4 +1,6 @@
 #include "BluetoothManager.h"
+#include "../mesh/MeshNetwork.h"
+#include "../protocol/MessageTypes.h"
 #include <iostream>
 #include <algorithm>
 #include <chrono>
@@ -9,11 +11,21 @@
 namespace echo {
 
 BluetoothManager::BluetoothManager() 
-    : isScanning_(false), isAdvertising_(false) {
+    : isScanning_(false), isAdvertising_(false), meshNetwork_(nullptr) {
     initializeAdapter();
     
 #ifdef _WIN32
     windowsAdvertiser_ = std::make_unique<WindowsAdvertiser>();
+    windowsAdvertiser_->setMessageReceivedCallback([this](const std::vector<uint8_t>& data) {
+        if (meshNetwork_ && !data.empty()) {
+            try {
+                auto msg = Message::deserialize(data);
+                meshNetwork_->processIncomingMessage(msg, "local-gatt");
+            } catch (const std::exception& e) {
+                std::cerr << "[BT Manager] Failed to process GATT message: " << e.what() << std::endl;
+            }
+        }
+    });
 #endif
 #ifdef __linux__
     bluezAdvertiser_ = std::make_unique<BluezAdvertiser>();
@@ -344,15 +356,7 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
                     std::lock_guard<std::mutex> lock(devicesMutex_);
                     connectedPeripherals_.push_back(peripheral);
                     
-                    peripheral.set_callback_on_connected([this, address]() {
-                        auto* p = findConnectedPeripheral(address);
-                        if (p) onPeripheralConnected(*p);
-                    });
-                    
-                    peripheral.set_callback_on_disconnected([this, address]() {
-                        auto* p = findConnectedPeripheral(address);
-                        if (p) onPeripheralDisconnected(*p);
-                    });
+                    setupCharacteristicNotifications(peripheral);
                     
                     std::cout << "Successfully connected to device: " << address << std::endl;
                     return true;
@@ -605,4 +609,134 @@ void BluetoothManager::setMessageBroadcastCallback(MessageBroadcastCallback call
     messageBroadcastCallback_ = std::move(callback);
 }
 
+void BluetoothManager::setMeshNetwork(std::shared_ptr<MeshNetwork> meshNetwork) {
+    meshNetwork_ = meshNetwork;
+    
+    if (meshNetwork_) {
+        meshNetwork_->setForwardCallback([this](const Message& msg, const std::vector<std::string>& excludeAddresses) {
+            auto data = msg.serialize();
+            
+            std::lock_guard<std::mutex> lock(devicesMutex_);
+            for (auto& peripheral : connectedPeripherals_) {
+                if (std::find(excludeAddresses.begin(), excludeAddresses.end(), peripheral.address()) == excludeAddresses.end()) {
+                    try {
+                        auto services = peripheral.services();
+                        for (auto& service : services) {
+                            if (service.uuid() == BITCHAT_SERVICE_UUID || 
+                                service.uuid().find("F47B5E2D") != std::string::npos) {
+                                auto characteristics = service.characteristics();
+                                for (auto& characteristic : characteristics) {
+                                    if (characteristic.uuid() == BITCHAT_TX_CHAR_UUID ||
+                                        characteristic.uuid() == BITCHAT_MESH_CHAR_UUID) {
+                                        peripheral.write_request(service.uuid(), characteristic.uuid(), data);
+                                        std::cout << "[Mesh Forward] Sent to " << peripheral.address() << std::endl;
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    } catch (const std::exception& e) {
+                        std::cerr << "[Mesh Forward] Error forwarding to " << peripheral.address() 
+                                 << ": " << e.what() << std::endl;
+                    }
+                }
+            }
+            
+#ifdef _WIN32
+            if (windowsAdvertiser_) {
+                windowsAdvertiser_->sendMessageViaCharacteristic(data);
+            }
+#endif
+        });
+    }
 }
+
+std::shared_ptr<MeshNetwork> BluetoothManager::getMeshNetwork() const {
+    return meshNetwork_;
+}
+
+void BluetoothManager::setupCharacteristicNotifications(SimpleBLE::Peripheral& peripheral) {
+    try {
+        std::cout << "[BT Manager] Setting up characteristic notifications for " << peripheral.address() << std::endl;
+        
+        auto services = peripheral.services();
+        for (auto& service : services) {
+            std::string serviceUuid = service.uuid();
+            std::transform(serviceUuid.begin(), serviceUuid.end(), serviceUuid.begin(), ::toupper);
+            
+            if (serviceUuid.find("F47B5E2D") != std::string::npos || serviceUuid == BITCHAT_SERVICE_UUID) {
+                std::cout << "[BT Manager] Found Echo service, setting up characteristics..." << std::endl;
+                
+                auto characteristics = service.characteristics();
+                for (auto& characteristic : characteristics) {
+                    std::string charUuid = characteristic.uuid();
+                    std::transform(charUuid.begin(), charUuid.end(), charUuid.begin(), ::toupper);
+                    
+                    bool canNotify = characteristic.can_notify();
+                    bool canIndicate = characteristic.can_indicate();
+                    
+                    if (charUuid.find("6D4A9B2E") != std::string::npos || charUuid == BITCHAT_RX_CHAR_UUID) {
+                        if (canNotify || canIndicate) {
+                            peripheral.notify(service.uuid(), characteristic.uuid(), 
+                                [this, address = peripheral.address()](SimpleBLE::ByteArray data) {
+                                    std::vector<uint8_t> vec(data.begin(), data.end());
+                                    std::cout << "[RX Char] Received " << vec.size() << " bytes from " << address << std::endl;
+                                    
+                                    if (meshNetwork_) {
+                                        try {
+                                            auto msg = Message::deserialize(vec);
+                                            meshNetwork_->processIncomingMessage(msg, address);
+                                        } catch (const std::exception& e) {
+                                            std::cerr << "[RX Char] Failed to process message: " << e.what() << std::endl;
+                                        }
+                                    }
+                                    
+                                    if (dataReceivedCallback_) {
+                                        dataReceivedCallback_(address, vec);
+                                    }
+                                }
+                            );
+                            std::cout << "[BT Manager] Subscribed to RX characteristic" << std::endl;
+                        }
+                    }
+                    else if (charUuid.find("9A3B5C7D") != std::string::npos || charUuid == BITCHAT_MESH_CHAR_UUID) {
+                        if (canNotify || canIndicate) {
+                            peripheral.notify(service.uuid(), characteristic.uuid(),
+                                [this, address = peripheral.address()](SimpleBLE::ByteArray data) {
+                                    std::vector<uint8_t> vec(data.begin(), data.end());
+                                    std::cout << "[MESH Char] Received " << vec.size() << " bytes from " << address << std::endl;
+                                    
+                                    if (meshNetwork_) {
+                                        try {
+                                            auto msg = Message::deserialize(vec);
+                                            meshNetwork_->processIncomingMessage(msg, address);
+                                        } catch (const std::exception& e) {
+                                            std::cerr << "[MESH Char] Failed to process message: " << e.what() << std::endl;
+                                        }
+                                    }
+                                }
+                            );
+                            std::cout << "[BT Manager] Subscribed to MESH characteristic" << std::endl;
+                        }
+                    }
+                }
+            }
+        }
+        
+        peripheral.set_callback_on_connected([this, address = peripheral.address()]() {
+            auto* p = findConnectedPeripheral(address);
+            if (p) onPeripheralConnected(*p);
+        });
+        
+        peripheral.set_callback_on_disconnected([this, address = peripheral.address()]() {
+            auto* p = findConnectedPeripheral(address);
+            if (p) onPeripheralDisconnected(*p);
+        });
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[BT Manager] Failed to setup notifications: " << e.what() << std::endl;
+    }
+}
+
+} // namespace echo

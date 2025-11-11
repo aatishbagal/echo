@@ -24,6 +24,8 @@
 
 namespace echo {
 
+class MeshNetwork;
+
 struct DiscoveredDevice {
     std::string address;
     std::string name;
@@ -74,6 +76,9 @@ public:
     
     bool sendData(const std::string& address, const std::vector<uint8_t>& data);
     
+    void setMeshNetwork(std::shared_ptr<MeshNetwork> meshNetwork);
+    std::shared_ptr<MeshNetwork> getMeshNetwork() const;
+    
 private:
     std::shared_ptr<SimpleBLE::Adapter> adapter_;
     std::vector<SimpleBLE::Peripheral> connectedPeripherals_;
@@ -89,6 +94,8 @@ private:
     
     std::atomic<bool> isScanning_;
     std::atomic<bool> isAdvertising_;
+    
+    std::shared_ptr<MeshNetwork> meshNetwork_;
     
 #ifdef _WIN32
     std::unique_ptr<WindowsAdvertiser> windowsAdvertiser_;
@@ -112,6 +119,8 @@ private:
     bool isBitChatDevice(const SimpleBLE::Peripheral& peripheral) const;
     bool parseEchoDevice(const SimpleBLE::Peripheral& peripheral, DiscoveredDevice& device);
     SimpleBLE::Peripheral* findConnectedPeripheral(const std::string& address);
+    
+    void setupCharacteristicNotifications(SimpleBLE::Peripheral& peripheral);
 };
 
 } // namespace echo

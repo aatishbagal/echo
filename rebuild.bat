@@ -62,6 +62,9 @@ set "VCPKG_ROOT="
 if exist "vcpkg\vcpkg.exe" (
     set "VCPKG_ROOT=%cd%\vcpkg"
     echo [OK] Using project vcpkg
+) else if exist "vcpkg_temp\vcpkg.exe" (
+    set "VCPKG_ROOT=%cd%\build\vcpkg"
+    echo [OK] Using preserved vcpkg
 ) else if exist "build\vcpkg\vcpkg.exe" (
     set "VCPKG_ROOT=%cd%\build\vcpkg"
     echo [OK] Using local vcpkg
