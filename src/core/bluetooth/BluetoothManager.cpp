@@ -334,7 +334,6 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
     
     return false;
 }
-}
 
 void BluetoothManager::disconnectFromDevice(const std::string& address) {
     std::lock_guard<std::mutex> lock(devicesMutex_);
