@@ -448,6 +448,7 @@ bool BluetoothManager::startEchoAdvertising(const std::string& username, const s
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <cstring>
 #endif
 
 void BluetoothManager::startLinuxInbox() {

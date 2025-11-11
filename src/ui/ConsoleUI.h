@@ -57,6 +57,7 @@ private:
     
     std::string findUsernameByAddress(const std::string& address, const BluetoothManager& bluetoothManager) const;
     std::string findAddressByUsername(const std::string& username, const BluetoothManager& bluetoothManager) const;
+    bool connectByTarget(const std::string& target, BluetoothManager& bluetoothManager);
 };
 
 } // namespace echo

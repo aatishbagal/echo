@@ -14,6 +14,8 @@ void IRCParser::initializeCommands() {
     commandMap_["/join"] = CommandType::JOIN;
     commandMap_["/exit"] = CommandType::EXIT;
     commandMap_["/msg"] = CommandType::MSG;
+    commandMap_["/connect"] = CommandType::CONNECT;
+    commandMap_["connect"] = CommandType::CONNECT;
     commandMap_["/who"] = CommandType::WHO;
     commandMap_["/nick"] = CommandType::NICK;
     commandMap_["devices"] = CommandType::DEVICES;
@@ -60,6 +62,13 @@ ParsedCommand IRCParser::parse(const std::string& input) {
                 if (!cmd.arguments.empty()) {
                     cmd.target = extractUsername(cmd.arguments[0]);
                     cmd.isValid = !cmd.target.empty();
+                } else {
+                    cmd.isValid = false;
+                }
+                break;
+            case CommandType::CONNECT:
+                if (!cmd.arguments.empty()) {
+                    cmd.target = cmd.arguments[0];
                 } else {
                     cmd.isValid = false;
                 }

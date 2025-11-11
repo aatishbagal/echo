@@ -13,6 +13,7 @@ enum class CommandType {
     JOIN,
     EXIT,
     MSG,
+    CONNECT,
     WHO,
     NICK,
     DEVICES,

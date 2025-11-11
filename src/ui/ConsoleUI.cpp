@@ -76,6 +76,7 @@ void ConsoleUI::printHelp() const {
     std::cout << "\n=== Echo Console Commands ===" << std::endl;
     std::cout << "scan              - Start scanning for devices" << std::endl;
     std::cout << "stop              - Stop scanning" << std::endl;
+    std::cout << "connect <addr|@user> - Connect to a device by BLE address or username" << std::endl;
     std::cout << "devices           - List all discovered devices" << std::endl;
     std::cout << "echo              - List only Echo devices" << std::endl;
     std::cout << "/chat @username   - Start personal chat" << std::endl;
@@ -130,6 +131,16 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
                 std::cout << "Started scanning for devices..." << std::endl;
             } else {
                 std::cout << "Failed to start scanning" << std::endl;
+            }
+            break;
+        case CommandType::CONNECT:
+            if (!cmd.target.empty()) {
+                bool ok = connectByTarget(cmd.target, bluetoothManager);
+                if (!ok) {
+                    std::cout << "Failed to connect. Use 'devices' or 'echo' to list targets." << std::endl;
+                }
+            } else {
+                std::cout << "Usage: connect <address|@username>" << std::endl;
             }
             break;
             
@@ -590,6 +601,19 @@ std::string ConsoleUI::findAddressByUsername(const std::string& username, const 
         }
     }
     return "";
+}
+
+bool ConsoleUI::connectByTarget(const std::string& target, BluetoothManager& bluetoothManager) {
+    std::string addr = target;
+    if (!target.empty() && target[0] == '@') {
+        addr = findAddressByUsername(target.substr(1), bluetoothManager);
+    }
+    if (addr.empty()) return false;
+    bool ok = bluetoothManager.connectToDevice(addr);
+    if (ok) {
+        std::cout << "Connecting to " << addr << "..." << std::endl;
+    }
+    return ok;
 }
 
 } // namespace echo
