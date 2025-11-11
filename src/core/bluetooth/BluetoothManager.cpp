@@ -291,9 +291,24 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
         
         for (auto& peripheral : peripherals) {
             if (peripheral.address() == address) {
+                std::cout << "Connecting to device: " << address << std::endl;
+                
                 peripheral.connect();
                 
                 if (peripheral.is_connected()) {
+                    std::cout << "Connection established, waiting for services..." << std::endl;
+                    
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    
+                    try {
+                        auto services = peripheral.services();
+                        std::cout << "Found " << services.size() << " services" << std::endl;
+                    } catch (const std::exception& e) {
+                        std::cerr << "Service discovery failed: " << e.what() << std::endl;
+                        peripheral.disconnect();
+                        return false;
+                    }
+                    
                     std::lock_guard<std::mutex> lock(devicesMutex_);
                     connectedPeripherals_.push_back(peripheral);
                     
@@ -307,7 +322,7 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
                         if (p) onPeripheralDisconnected(*p);
                     });
                     
-                    std::cout << "Connected to device: " << address << std::endl;
+                    std::cout << "Successfully connected to device: " << address << std::endl;
                     return true;
                 }
             }
@@ -318,6 +333,7 @@ bool BluetoothManager::connectToDevice(const std::string& address) {
     }
     
     return false;
+}
 }
 
 void BluetoothManager::disconnectFromDevice(const std::string& address) {
@@ -448,7 +464,10 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
         
         if (peripheral && peripheral->is_connected()) {
             try {
+                std::cout << "[SEND] Accessing services for " << address << std::endl;
                 auto services = peripheral->services();
+                std::cout << "[SEND] Found " << services.size() << " services" << std::endl;
+                
                 for (auto& service : services) {
                     if (service.uuid() == BITCHAT_SERVICE_UUID) {
                         auto characteristics = service.characteristics();
@@ -466,7 +485,8 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
                 return false;
                 
             } catch (const std::exception& e) {
-                std::cerr << "Failed to send data to " << address << ": " << e.what() << std::endl;
+                std::cerr << "[SEND] Error accessing device " << address << ": " << e.what() << std::endl;
+                std::cerr << "[SEND] Device may not be ready, services may not be discovered" << std::endl;
                 return false;
             }
         }
@@ -479,6 +499,8 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
         std::cerr << "[SEND FAILED] Could not connect to device " << address << std::endl;
         return false;
     }
+    
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
     
     std::lock_guard<std::mutex> lock(devicesMutex_);
     auto* peripheral = findConnectedPeripheral(address);
