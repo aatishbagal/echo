@@ -113,7 +113,7 @@ void ConsoleUI::printChatHelp() const {
 }
 
 void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& bluetoothManager, UserIdentity& identity) {
-    if (command.rfind("/file", 0) == 0) {
+    if (command.rfind("/file", 0) == 0 && currentChatMode_ != ChatMode::GLOBAL) {
         size_t p1 = command.find('\'');
         size_t p2 = command.find('\'', p1 == std::string::npos ? 0 : p1 + 1);
         if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1 + 1) {
@@ -128,7 +128,7 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
             return;
         }
     }
-    if (command.rfind("/accept", 0) == 0) {
+    if (command.rfind("/accept", 0) == 0 && currentChatMode_ != ChatMode::GLOBAL) {
         std::istringstream iss(command);
         std::string cmd, id; iss >> cmd >> id;
         if (!id.empty()) handleFileAccept(id);
@@ -136,7 +136,7 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
         std::cout << getPrompt();
         return;
     }
-    if (command.rfind("/decline", 0) == 0) {
+    if (command.rfind("/decline", 0) == 0 && currentChatMode_ != ChatMode::GLOBAL) {
         std::istringstream iss(command);
         std::string cmd, id; iss >> cmd >> id;
         if (!id.empty()) handleFileDecline(id);
@@ -364,6 +364,34 @@ void ConsoleUI::handleChatMode(const std::string& input, BluetoothManager& bluet
             displayMessage("You", input, false);
         } else {
             displayMessage("You", input, true);
+        }
+    } else if (!input.empty() && input[0] == '/') {
+        if (input.rfind("/file", 0) == 0) {
+            size_t p1 = input.find('\'');
+            size_t p2 = input.find('\'', p1 == std::string::npos ? 0 : p1 + 1);
+            if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1 + 1) {
+                std::string path = input.substr(p1 + 1, p2 - p1 - 1);
+                bool ok = handleFileSend(path, bluetoothManager, identity);
+                std::cout << (ok ? "[GLOBAL] sent" : "[GLOBAL] failed") << std::endl;
+            } else {
+                std::cout << "Usage: /file 'full_path'" << std::endl;
+            }
+            std::cout << getPrompt();
+            return;
+        }
+        if (input.rfind("/accept", 0) == 0) {
+            std::istringstream iss(input);
+            std::string cmd, id; iss >> cmd >> id;
+            if (!id.empty()) handleFileAccept(id); else std::cout << "Usage: /accept <id>" << std::endl;
+            std::cout << getPrompt();
+            return;
+        }
+        if (input.rfind("/decline", 0) == 0) {
+            std::istringstream iss(input);
+            std::string cmd, id; iss >> cmd >> id;
+            if (!id.empty()) handleFileDecline(id); else std::cout << "Usage: /decline <id>" << std::endl;
+            std::cout << getPrompt();
+            return;
         }
     }
     
@@ -704,19 +732,21 @@ void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& /*
 }
 
 bool ConsoleUI::handleFileSend(const std::string& path, BluetoothManager& bluetoothManager, UserIdentity& identity) {
-    if (currentChatMode_ != ChatMode::GLOBAL) return false;
+    if (currentChatMode_ != ChatMode::GLOBAL) { std::cout << "Not in global chat" << std::endl; return false; }
     std::error_code ec;
     std::filesystem::path p(path);
-    if (!std::filesystem::exists(p, ec) || !std::filesystem::is_regular_file(p, ec)) return false;
+    if (!std::filesystem::exists(p, ec)) { std::cout << "File not found" << std::endl; return false; }
+    if (!std::filesystem::is_regular_file(p, ec)) { std::cout << "Not a regular file" << std::endl; return false; }
     uintmax_t sz = std::filesystem::file_size(p, ec);
-    if (ec) return false;
-    if (sz == 0 || sz > MAX_FILE_BYTES) return false;
+    if (ec) { std::cout << "Size error" << std::endl; return false; }
+    if (sz == 0) { std::cout << "Empty file" << std::endl; return false; }
+    if (sz > MAX_FILE_BYTES) { std::cout << "File too large limit=" << MAX_FILE_BYTES << std::endl; return false; }
     std::vector<uint8_t> buf(sz);
     FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return false;
+    if (!f) { std::cout << "Open failed" << std::endl; return false; }
     size_t r = fread(buf.data(), 1, buf.size(), f);
     fclose(f);
-    if (r != buf.size()) return false;
+    if (r != buf.size()) { std::cout << "Read failed" << std::endl; return false; }
     std::string b64 = base64Encode(buf);
     std::string id = generateFileId();
     std::string fname = p.filename().string();
@@ -726,6 +756,7 @@ bool ConsoleUI::handleFileSend(const std::string& path, BluetoothManager& blueto
     if (wifi_) any = wifi_->sendBroadcast(data) || any;
     auto devices = bluetoothManager.getEchoDevices();
     for (const auto& d : devices) { any = bluetoothManager.sendData(d.address, data) || any; }
+    if (!any) { std::cout << "No recipients" << std::endl; }
     return any;
 }
 
@@ -757,19 +788,29 @@ void ConsoleUI::handleFileDecline(const std::string& id) {
 
 std::string ConsoleUI::base64Encode(const std::vector<uint8_t>& data) {
     static const char* tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out; out.reserve((data.size()+2)/3*4);
-    size_t i = 0; while (i < data.size()) {
-        uint32_t a = i < data.size() ? data[i++] : 0;
-        uint32_t b = i < data.size() ? data[i++] : 0;
-        uint32_t c = i < data.size() ? data[i++] : 0;
-        uint32_t n = (a << 16) | (b << 8) | c;
-        out.push_back(tbl[(n >> 18) & 63]);
-        out.push_back(tbl[(n >> 12) & 63]);
-        out.push_back(i - 1 > data.size() ? '=' : tbl[(n >> 6) & 63]);
-        out.push_back(i > data.size() ? '=' : tbl[n & 63]);
+    std::string out; out.reserve(((data.size() + 2) / 3) * 4);
+    size_t i = 0; size_t n = data.size();
+    while (i + 2 < n) {
+        uint32_t val = (data[i] << 16) | (data[i+1] << 8) | data[i+2];
+        out.push_back(tbl[(val >> 18) & 63]);
+        out.push_back(tbl[(val >> 12) & 63]);
+        out.push_back(tbl[(val >> 6) & 63]);
+        out.push_back(tbl[val & 63]);
+        i += 3;
     }
-    size_t mod = data.size() % 3;
-    if (mod) { out[out.size()-1] = '='; if (mod == 1) out[out.size()-2] = '='; }
+    if (i < n) {
+        uint32_t val = data[i] << 16;
+        if (i + 1 < n) val |= (data[i+1] << 8);
+        out.push_back(tbl[(val >> 18) & 63]);
+        out.push_back(tbl[(val >> 12) & 63]);
+        if (i + 1 < n) {
+            out.push_back(tbl[(val >> 6) & 63]);
+            out.push_back('=');
+        } else {
+            out.push_back('=');
+            out.push_back('=');
+        }
+    }
     return out;
 }
 
