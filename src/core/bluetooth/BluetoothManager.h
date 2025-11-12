@@ -73,6 +73,7 @@ public:
     void setMessageBroadcastCallback(MessageBroadcastCallback callback);
     
     bool sendData(const std::string& address, const std::vector<uint8_t>& data);
+    void debugPrintServices(const std::string& address);
     
 private:
     std::shared_ptr<SimpleBLE::Adapter> adapter_;

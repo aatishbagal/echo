@@ -77,6 +77,7 @@ void ConsoleUI::printHelp() const {
     std::cout << "scan              - Start scanning for devices" << std::endl;
     std::cout << "stop              - Stop scanning" << std::endl;
     std::cout << "connect <addr|@user> - Connect to a device by BLE address or username" << std::endl;
+    std::cout << "services <addr|@user> - List GATT services/characteristics for a connected device" << std::endl;
     std::cout << "devices           - List all discovered devices" << std::endl;
     std::cout << "echo              - List only Echo devices" << std::endl;
     std::cout << "/chat @username   - Start personal chat" << std::endl;
@@ -113,6 +114,12 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
         else if (simpleCmd == "stop") cmd.type = CommandType::STOP;
         else if (simpleCmd == "devices") cmd.type = CommandType::DEVICES;
         else if (simpleCmd == "echo") cmd.type = CommandType::ECHO_DEVICES;
+        else if (simpleCmd == "services") {
+            cmd.type = CommandType::STATUS;
+            if (iss >> simpleCmd) {
+                cmd.target = simpleCmd;
+            }
+        }
         else if (simpleCmd == "whoami") cmd.type = CommandType::WHOAMI;
         else if (simpleCmd == "help") cmd.type = CommandType::HELP;
         else if (simpleCmd == "clear" || simpleCmd == "cls") cmd.type = CommandType::CLEAR;
@@ -213,6 +220,22 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
             printHelp();
             return;
             
+        case CommandType::STATUS:
+            if (!cmd.target.empty()) {
+                std::string addr = cmd.target;
+                if (addr[0] == '@') addr = findAddressByUsername(addr.substr(1), bluetoothManager);
+                if (!addr.empty()) bluetoothManager.debugPrintServices(addr);
+                else std::cout << "Target not found" << std::endl;
+            } else {
+                if (currentChatMode_ == ChatMode::GLOBAL) {
+                    std::cout << "In global chat (#global)" << std::endl;
+                } else if (currentChatMode_ == ChatMode::PERSONAL) {
+                    std::cout << "In personal chat with: " << currentChatTarget_ << std::endl;
+                } else {
+                    std::cout << "Not in chat mode" << std::endl;
+                }
+            }
+            break;
         default:
             break;
     }

@@ -550,12 +550,43 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
         }
         
         std::cerr << "[SEND FAILED] No TX characteristic found for " << address << std::endl;
+        std::cerr << "[DEBUG] Available services and characteristics for " << address << ":" << std::endl;
+        for (auto& service : services) {
+            std::cerr << "  Service: " << service.uuid() << std::endl;
+            for (auto& ch : service.characteristics()) {
+                std::cerr << "    Char: " << ch.uuid() << std::endl;
+            }
+        }
         
     } catch (const std::exception& e) {
         std::cerr << "Failed to send data to " << address << ": " << e.what() << std::endl;
     }
     
     return false;
+}
+
+void BluetoothManager::debugPrintServices(const std::string& address) {
+    std::lock_guard<std::mutex> lock(devicesMutex_);
+    auto* peripheral = findConnectedPeripheral(address);
+    if (!peripheral || !peripheral->is_connected()) {
+        std::cout << "[DEBUG] Device " << address << " not connected" << std::endl;
+        return;
+    }
+    try {
+        auto services = peripheral->services();
+        if (services.empty()) {
+            std::cout << "[DEBUG] No services found for " << address << std::endl;
+        }
+        for (auto& service : services) {
+            std::cout << "[DEBUG] Service: " << service.uuid() << std::endl;
+            auto chars = service.characteristics();
+            for (auto& ch : chars) {
+                std::cout << "[DEBUG]   Char: " << ch.uuid() << std::endl;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cout << "[DEBUG] Error listing services for " << address << ": " << e.what() << std::endl;
+    }
 }
 
 void BluetoothManager::setDeviceDiscoveredCallback(DeviceDiscoveredCallback callback) {
