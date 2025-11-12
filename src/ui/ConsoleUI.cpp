@@ -27,11 +27,7 @@ ConsoleUI::~ConsoleUI() {
 
 void ConsoleUI::run(BluetoothManager& bluetoothManager, UserIdentity& identity) {
     running_ = true;
-    wifi_ = std::make_unique<echo::WifiDirect>();
-    wifi_->setOnData([this](const std::string& /*src*/, const std::vector<uint8_t>& data) {
-        onDataReceived("wifi", data);
-    });
-    wifi_->start(identity.getUsername(), identity.getFingerprint());
+    // Wi-Fi module will be started via 'wifi start' command
     
     bluetoothManager.setDeviceDiscoveredCallback(
         [this](const DiscoveredDevice& device) {
@@ -128,19 +124,36 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
             }
         }
     else if (simpleCmd == "whoami") cmd.type = CommandType::WHOAMI;
-            else if (simpleCmd == "scan" && iss >> simpleCmd && simpleCmd == "wifi") { // enable verbose wifi logging
-                cmd.type = CommandType::STATUS;
-                wifi_->setVerbose(true);
-                std::cout << "wifi verbose on" << std::endl;
-                return;
+            else if (simpleCmd == "wifi") {
+                std::string sub;
+                if (iss >> sub) {
+                    if (sub == "start") {
+                        if (!wifi_) {
+                            wifi_ = std::make_unique<echo::WifiDirect>();
+                            wifi_->setOnData([this](const std::string& /*src*/, const std::vector<uint8_t>& data) { onDataReceived("wifi", data); });
+                            wifi_->start(identity.getUsername(), identity.getFingerprint());
+                        }
+                        wifi_->setVerbose(true);
+                        std::string ip = wifi_->getLocalIp();
+                        std::cout << "wifi started " << (ip.empty() ? "" : ip + ":" + std::to_string(wifi_->getPort())) << std::endl;
+                        return;
+                    } else if (sub == "stop") {
+                        if (wifi_) {
+                            wifi_->setVerbose(false);
+                            wifi_->stop();
+                            wifi_.reset();
+                        }
+                        std::cout << "wifi stopped" << std::endl;
+                        return;
+                    } else if (sub == "peers") {
+                        cmd.type = CommandType::STATUS; cmd.target = "__wifi_peers";
+                    } else {
+                        std::cout << "Unknown wifi subcommand" << std::endl; std::cout << getPrompt(); return;
+                    }
+                } else {
+                    cmd.type = CommandType::STATUS; cmd.target = "__wifi_peers";
+                }
             }
-            else if (simpleCmd == "wifi" && iss >> simpleCmd && simpleCmd == "stop") { // disable verbose wifi logging
-                cmd.type = CommandType::STATUS;
-                wifi_->setVerbose(false);
-                std::cout << "wifi verbose off" << std::endl;
-                return;
-            }
-        else if (simpleCmd == "wifi") { cmd.type = CommandType::STATUS; cmd.target = "__wifi_peers"; }
         else if (simpleCmd == "help") cmd.type = CommandType::HELP;
         else if (simpleCmd == "clear" || simpleCmd == "cls") cmd.type = CommandType::CLEAR;
         else if (simpleCmd == "quit" || simpleCmd == "exit") cmd.type = CommandType::QUIT;

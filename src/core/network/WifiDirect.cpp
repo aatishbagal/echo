@@ -46,6 +46,37 @@ void WifiDirect::stop() {
 
 void WifiDirect::setOnData(std::function<void(const std::string&, const std::vector<uint8_t>&)> cb) { onData_ = std::move(cb); }
 
+std::string WifiDirect::getLocalIp() const {
+#ifdef __linux__
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return "";
+    sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(80);
+    inet_aton("8.8.8.8", &addr.sin_addr);
+    connect(s, (sockaddr*)&addr, sizeof(addr));
+    sockaddr_in name{}; socklen_t len = sizeof(name);
+    if (getsockname(s, (sockaddr*)&name, &len) < 0) { close(s); return ""; }
+    std::string ip = inet_ntoa(name.sin_addr);
+    close(s);
+    return ip;
+#elif defined(_WIN32)
+    WSADATA wsa; if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) { return ""; }
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) { WSACleanup(); return ""; }
+    sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(80);
+    inet_pton(AF_INET, "8.8.8.8", &addr.sin_addr);
+    connect(s, (sockaddr*)&addr, sizeof(addr));
+    sockaddr_in name{}; int len = sizeof(name);
+    if (getsockname(s, (sockaddr*)&name, &len) == SOCKET_ERROR) { closesocket(s); WSACleanup(); return ""; }
+    char ipstr[INET_ADDRSTRLEN] = {0}; inet_ntop(AF_INET, &name.sin_addr, ipstr, INET_ADDRSTRLEN);
+    std::string ip = ipstr[0] ? ipstr : "";
+    closesocket(s);
+    WSACleanup();
+    return ip;
+#else
+    return "";
+#endif
+}
+
 bool WifiDirect::sendTo(const std::string& username, const std::vector<uint8_t>& data) {
     std::lock_guard<std::mutex> lock(mtx_);
     auto it = peers_.find(username);

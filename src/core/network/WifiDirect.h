@@ -23,6 +23,8 @@ public:
     bool sendBroadcast(const std::vector<uint8_t>& data);
     std::vector<std::pair<std::string,std::string>> listPeers();
     void setVerbose(bool enabled) { verbose_ = enabled; }
+    std::string getLocalIp() const;
+    uint16_t getPort() const { return tcpPort_; }
 
 private:
     struct Peer { std::string ip; uint16_t port; std::chrono::steady_clock::time_point lastSeen; };
