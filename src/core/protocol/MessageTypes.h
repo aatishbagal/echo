@@ -91,6 +91,13 @@ public:
     
     static Message createPingMessage();
     static Message createPongMessage();
+    static Message createFileDataMessage(const std::string& id,
+                                        const std::string& senderUsername,
+                                        const std::string& senderFingerprint,
+                                        const std::string& filename,
+                                        uint32_t sizeBytes,
+                                        const std::string& base64,
+                                        bool isGlobal);
     
     static uint32_t generateMessageId();
     

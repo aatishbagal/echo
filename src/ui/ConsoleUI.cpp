@@ -90,6 +90,9 @@ void ConsoleUI::printHelp() const {
     std::cout << "/chat @username   - Start personal chat" << std::endl;
     std::cout << "/join #global     - Join global chat" << std::endl;
     std::cout << "/msg @user text   - Send quick message" << std::endl;
+    std::cout << "/file 'path'      - Send file to #global (size limit)" << std::endl;
+    std::cout << "/accept <id>      - Accept a received file" << std::endl;
+    std::cout << "/decline <id>     - Decline a received file" << std::endl;
     std::cout << "/who              - List online Echo users" << std::endl;
     std::cout << "whoami            - Show your identity" << std::endl;
     std::cout << "/nick <name>      - Change your username" << std::endl;
@@ -110,6 +113,37 @@ void ConsoleUI::printChatHelp() const {
 }
 
 void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& bluetoothManager, UserIdentity& identity) {
+    if (command.rfind("/file", 0) == 0) {
+        size_t p1 = command.find('\'');
+        size_t p2 = command.find('\'', p1 == std::string::npos ? 0 : p1 + 1);
+        if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1 + 1) {
+            std::string path = command.substr(p1 + 1, p2 - p1 - 1);
+            bool ok = handleFileSend(path, bluetoothManager, identity);
+            std::cout << (ok ? "[GLOBAL] sent" : "[GLOBAL] failed") << std::endl;
+            std::cout << getPrompt();
+            return;
+        } else {
+            std::cout << "Usage: /file 'full_path'" << std::endl;
+            std::cout << getPrompt();
+            return;
+        }
+    }
+    if (command.rfind("/accept", 0) == 0) {
+        std::istringstream iss(command);
+        std::string cmd, id; iss >> cmd >> id;
+        if (!id.empty()) handleFileAccept(id);
+        else std::cout << "Usage: /accept <id>" << std::endl;
+        std::cout << getPrompt();
+        return;
+    }
+    if (command.rfind("/decline", 0) == 0) {
+        std::istringstream iss(command);
+        std::string cmd, id; iss >> cmd >> id;
+        if (!id.empty()) handleFileDecline(id);
+        else std::cout << "Usage: /decline <id>" << std::endl;
+        std::cout << getPrompt();
+        return;
+    }
     auto cmd = commandParser_.parse(command);
     
     if (!cmd.isValid && !command.empty()) {
@@ -633,6 +667,23 @@ void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& /*
         msg.header.type == MessageType::PRIVATE_MESSAGE) {
         
         auto textMsg = TextMessage::deserialize(msg.payload);
+        if (textMsg.content.rfind("::FILE::", 0) == 0) {
+            size_t a = textMsg.content.find("::", 8);
+            size_t b = textMsg.content.find("::", a == std::string::npos ? 0 : a + 2);
+            size_t c = textMsg.content.find("::", b == std::string::npos ? 0 : b + 2);
+            if (a != std::string::npos && b != std::string::npos && c != std::string::npos) {
+                std::string id = textMsg.content.substr(8, a - 8);
+                std::string filename = textMsg.content.substr(a + 2, b - (a + 2));
+                std::string ssize = textMsg.content.substr(b + 2, c - (b + 2));
+                std::string b64 = textMsg.content.substr(c + 2);
+                pendingFiles_[id] = {filename, b64};
+                std::cout << "\n[FILE] from " << textMsg.senderUsername << ": " << filename << " bytes=" << ssize << " id=" << id << std::endl;
+                std::cout << "Use /accept " << id << " or /decline " << id << std::endl;
+                std::cout << getPrompt();
+                std::cout.flush();
+                return;
+            }
+        }
         
         if (textMsg.isGlobal && currentChatMode_ == ChatMode::GLOBAL) {
             displayMessage(textMsg.senderUsername, textMsg.content, false);
@@ -650,6 +701,105 @@ void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& /*
             std::cout.flush();
         }
     }
+}
+
+bool ConsoleUI::handleFileSend(const std::string& path, BluetoothManager& bluetoothManager, UserIdentity& identity) {
+    if (currentChatMode_ != ChatMode::GLOBAL) return false;
+    std::error_code ec;
+    std::filesystem::path p(path);
+    if (!std::filesystem::exists(p, ec) || !std::filesystem::is_regular_file(p, ec)) return false;
+    uintmax_t sz = std::filesystem::file_size(p, ec);
+    if (ec) return false;
+    if (sz == 0 || sz > MAX_FILE_BYTES) return false;
+    std::vector<uint8_t> buf(sz);
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return false;
+    size_t r = fread(buf.data(), 1, buf.size(), f);
+    fclose(f);
+    if (r != buf.size()) return false;
+    std::string b64 = base64Encode(buf);
+    std::string id = generateFileId();
+    std::string fname = p.filename().string();
+    auto msg = MessageFactory::createFileDataMessage(id, identity.getUsername(), identity.getFingerprint(), fname, (uint32_t)sz, b64, true);
+    auto data = msg.serialize();
+    bool any = false;
+    if (wifi_) any = wifi_->sendBroadcast(data) || any;
+    auto devices = bluetoothManager.getEchoDevices();
+    for (const auto& d : devices) { any = bluetoothManager.sendData(d.address, data) || any; }
+    return any;
+}
+
+void ConsoleUI::handleFileAccept(const std::string& id) {
+    auto it = pendingFiles_.find(id);
+    if (it == pendingFiles_.end()) { std::cout << "No such file id" << std::endl; return; }
+    std::string filename = it->second.first;
+    std::string b64 = it->second.second;
+    auto data = base64Decode(b64);
+    if (data.empty() || data.size() > MAX_FILE_BYTES) { std::cout << "Invalid file" << std::endl; pendingFiles_.erase(it); return; }
+    std::filesystem::path dir = std::filesystem::current_path() / "FileSharing";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    for (auto& ch : filename) { if (ch == '/' || ch == '\\') ch = '_'; }
+    std::filesystem::path out = dir / filename;
+    FILE* f = fopen(out.string().c_str(), "wb");
+    if (!f) { std::cout << "Save failed" << std::endl; return; }
+    fwrite(data.data(), 1, data.size(), f);
+    fclose(f);
+    std::cout << "Saved " << out.string() << std::endl;
+    pendingFiles_.erase(id);
+}
+
+void ConsoleUI::handleFileDecline(const std::string& id) {
+    auto it = pendingFiles_.find(id);
+    if (it != pendingFiles_.end()) pendingFiles_.erase(it);
+    std::cout << "Declined " << id << std::endl;
+}
+
+std::string ConsoleUI::base64Encode(const std::vector<uint8_t>& data) {
+    static const char* tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out; out.reserve((data.size()+2)/3*4);
+    size_t i = 0; while (i < data.size()) {
+        uint32_t a = i < data.size() ? data[i++] : 0;
+        uint32_t b = i < data.size() ? data[i++] : 0;
+        uint32_t c = i < data.size() ? data[i++] : 0;
+        uint32_t n = (a << 16) | (b << 8) | c;
+        out.push_back(tbl[(n >> 18) & 63]);
+        out.push_back(tbl[(n >> 12) & 63]);
+        out.push_back(i - 1 > data.size() ? '=' : tbl[(n >> 6) & 63]);
+        out.push_back(i > data.size() ? '=' : tbl[n & 63]);
+    }
+    size_t mod = data.size() % 3;
+    if (mod) { out[out.size()-1] = '='; if (mod == 1) out[out.size()-2] = '='; }
+    return out;
+}
+
+std::vector<uint8_t> ConsoleUI::base64Decode(const std::string& s) {
+    auto val = [](char c) -> int { if (c >= 'A' && c <= 'Z') return c - 'A'; if (c >= 'a' && c <= 'z') return c - 'a' + 26; if (c >= '0' && c <= '9') return c - '0' + 52; if (c == '+') return 62; if (c == '/') return 63; if (c == '=') return -1; return -2; };
+    std::vector<uint8_t> out; out.reserve(s.size()/4*3);
+    int n = 0; uint32_t buf = 0; int pad = 0;
+    for (char c : s) {
+        int v = val(c);
+        if (v == -2) continue;
+        if (v == -1) { v = 0; pad++; }
+        buf = (buf << 6) | (uint32_t)v; n += 6;
+        if (n >= 24) {
+            out.push_back((buf >> 16) & 0xFF);
+            if (pad < 2) out.push_back((buf >> 8) & 0xFF);
+            if (pad < 1) out.push_back(buf & 0xFF);
+            buf = 0; n = 0; pad = 0;
+        }
+    }
+    return out;
+}
+
+std::string ConsoleUI::generateFileId() {
+    static const char* hexd = "0123456789abcdef";
+    uint32_t r1 = MessageFactory::generateMessageId();
+    uint32_t r2 = MessageFactory::generateMessageId();
+    char buf[17];
+    for (int i = 0; i < 8; ++i) buf[i] = hexd[(r1 >> ((7 - i) * 4)) & 0xF];
+    for (int i = 0; i < 8; ++i) buf[8 + i] = hexd[(r2 >> ((7 - i) * 4)) & 0xF];
+    return std::string(buf, buf + 16);
 }
 
 std::string ConsoleUI::findUsernameByAddress(const std::string& address, const BluetoothManager& bluetoothManager) const {

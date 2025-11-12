@@ -7,6 +7,8 @@
 #include <deque>
 #include <mutex>
 #include <atomic>
+#include <unordered_map>
+#include <filesystem>
 
 namespace echo {
 
@@ -60,6 +62,15 @@ private:
     std::string findUsernameByAddress(const std::string& address, const BluetoothManager& bluetoothManager) const;
     std::string findAddressByUsername(const std::string& username, const BluetoothManager& bluetoothManager) const;
     bool connectByTarget(const std::string& target, BluetoothManager& bluetoothManager);
+
+    bool handleFileSend(const std::string& path, BluetoothManager& bluetoothManager, UserIdentity& identity);
+    void handleFileAccept(const std::string& id);
+    void handleFileDecline(const std::string& id);
+    std::string base64Encode(const std::vector<uint8_t>& data);
+    std::vector<uint8_t> base64Decode(const std::string& encoded);
+    std::string generateFileId();
+    std::unordered_map<std::string, std::pair<std::string,std::string>> pendingFiles_;
+    static constexpr size_t MAX_FILE_BYTES = 32768;
 };
 
 } // namespace echo

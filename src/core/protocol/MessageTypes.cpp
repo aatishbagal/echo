@@ -274,4 +274,30 @@ uint32_t MessageFactory::generateMessageId() {
     return dis(gen);
 }
 
+Message MessageFactory::createFileDataMessage(const std::string& id,
+                                             const std::string& senderUsername,
+                                             const std::string& senderFingerprint,
+                                             const std::string& filename,
+                                             uint32_t sizeBytes,
+                                             const std::string& base64,
+                                             bool isGlobal) {
+    std::string content = std::string("::FILE::") + id + "::" + filename + "::" + std::to_string(sizeBytes) + "::" + base64;
+    TextMessage textMsg;
+    textMsg.senderUsername = senderUsername;
+    textMsg.senderFingerprint = senderFingerprint;
+    textMsg.recipientUsername = "";
+    textMsg.content = content;
+    textMsg.timestamp = std::chrono::system_clock::now();
+    textMsg.isGlobal = isGlobal;
+    Message msg;
+    msg.header.type = isGlobal ? MessageType::GLOBAL_MESSAGE : MessageType::PRIVATE_MESSAGE;
+    msg.header.version = 1;
+    msg.header.messageId = generateMessageId();
+    msg.header.timestamp = static_cast<uint32_t>(std::chrono::system_clock::to_time_t(textMsg.timestamp));
+    msg.header.ttl = 7;
+    msg.payload = textMsg.serialize();
+    msg.header.length = static_cast<uint16_t>(msg.payload.size());
+    return msg;
+}
+
 } // namespace echo
