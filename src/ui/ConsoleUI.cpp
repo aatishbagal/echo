@@ -128,7 +128,19 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
             }
         }
     else if (simpleCmd == "whoami") cmd.type = CommandType::WHOAMI;
-    else if (simpleCmd == "wifi") { cmd.type = CommandType::STATUS; cmd.target = "__wifi_peers"; }
+            else if (simpleCmd == "scan" && iss >> simpleCmd && simpleCmd == "wifi") { // enable verbose wifi logging
+                cmd.type = CommandType::STATUS;
+                wifi_->setVerbose(true);
+                std::cout << "wifi verbose on" << std::endl;
+                return;
+            }
+            else if (simpleCmd == "wifi" && iss >> simpleCmd && simpleCmd == "stop") { // disable verbose wifi logging
+                cmd.type = CommandType::STATUS;
+                wifi_->setVerbose(false);
+                std::cout << "wifi verbose off" << std::endl;
+                return;
+            }
+        else if (simpleCmd == "wifi") { cmd.type = CommandType::STATUS; cmd.target = "__wifi_peers"; }
         else if (simpleCmd == "help") cmd.type = CommandType::HELP;
         else if (simpleCmd == "clear" || simpleCmd == "cls") cmd.type = CommandType::CLEAR;
         else if (simpleCmd == "quit" || simpleCmd == "exit") cmd.type = CommandType::QUIT;
@@ -388,15 +400,14 @@ void ConsoleUI::sendMessage(const std::string& message, BluetoothManager& blueto
     
     if (isGlobal) {
         auto devices = bluetoothManager.getEchoDevices();
-        size_t okCount = 0;
+        bool anySent = false;
         for (const auto& device : devices) {
-            if (bluetoothManager.sendData(device.address, data)) okCount++;
+            anySent = bluetoothManager.sendData(device.address, data) || anySent;
         }
-        std::cout << "[GLOBAL] BLE sent to " << okCount << "/" << devices.size() << " peers" << std::endl;
         if (wifi_) {
-            bool any = wifi_->sendBroadcast(data);
-            std::cout << "[GLOBAL] WIFI broadcast " << (any ? "ok" : "no peers") << std::endl;
+            anySent = wifi_->sendBroadcast(data) || anySent;
         }
+        std::cout << "[GLOBAL] " << (anySent ? "sent" : "failed") << std::endl;
     } else {
         auto targetAddress = findAddressByUsername(currentChatTarget_, bluetoothManager);
         if (!targetAddress.empty()) {
