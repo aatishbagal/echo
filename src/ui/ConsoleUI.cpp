@@ -27,7 +27,11 @@ ConsoleUI::~ConsoleUI() {
 
 void ConsoleUI::run(BluetoothManager& bluetoothManager, UserIdentity& identity) {
     running_ = true;
-    // Wi-Fi module will be started via 'wifi start' command
+    wifi_ = std::make_unique<echo::WifiDirect>();
+    wifi_->setOnData([this](const std::string& /*src*/, const std::vector<uint8_t>& data) {
+        onDataReceived("wifi", data);
+    });
+    wifi_->start(identity.getUsername(), identity.getFingerprint());
     
     bluetoothManager.setDeviceDiscoveredCallback(
         [this](const DiscoveredDevice& device) {
@@ -134,16 +138,11 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
                             wifi_->start(identity.getUsername(), identity.getFingerprint());
                         }
                         wifi_->setVerbose(true);
-                        std::string ip = wifi_->getLocalIp();
-                        std::cout << "wifi started " << (ip.empty() ? "" : ip + ":" + std::to_string(wifi_->getPort())) << std::endl;
+                        std::cout << "wifi verbose on" << std::endl;
                         return;
                     } else if (sub == "stop") {
-                        if (wifi_) {
-                            wifi_->setVerbose(false);
-                            wifi_->stop();
-                            wifi_.reset();
-                        }
-                        std::cout << "wifi stopped" << std::endl;
+                        if (wifi_) wifi_->setVerbose(false);
+                        std::cout << "wifi verbose off" << std::endl;
                         return;
                     } else if (sub == "peers") {
                         cmd.type = CommandType::STATUS; cmd.target = "__wifi_peers";
