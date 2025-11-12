@@ -71,6 +71,7 @@ set(SOURCES
     src/core/protocol/MessageTypes.cpp
     src/core/commands/IRCParser.cpp
     src/ui/ConsoleUI.cpp
+    src/core/network/WifiDirect.cpp
 )
 
 if(WIN32)

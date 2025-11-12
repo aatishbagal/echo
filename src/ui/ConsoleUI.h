@@ -11,6 +11,7 @@
 namespace echo {
 
 class UserIdentity;
+class WifiDirect;
 
 class ConsoleUI {
 public:
@@ -24,6 +25,7 @@ private:
     IRCParser commandParser_;
     ChatMode currentChatMode_;
     std::string currentChatTarget_;
+    std::unique_ptr<WifiDirect> wifi_;
     
     std::deque<std::string> messageHistory_;
     std::mutex historyMutex_;

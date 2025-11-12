@@ -47,14 +47,30 @@ void BluetoothManager::initializeAdapter() {
               << " (" << adapter_->address() << ")" << std::endl;
 }
 
+bool BluetoothManager::ensureAdapterReady() {
+    if (!adapter_) {
+        try { initializeAdapter(); } catch (...) { return false; }
+    }
+    try {
+        if (!adapter_->initialized()) return false;
+        if (!adapter_->is_powered()) {
+            adapter_->power_on();
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[Bluetooth] Adapter not ready: " << e.what() << std::endl;
+        return false;
+    }
+    return true;
+}
+
 bool BluetoothManager::isBluetoothAvailable() const {
     return adapter_ != nullptr && adapter_->initialized();
 }
 
 bool BluetoothManager::startScanning() {
-    if (!adapter_ || isScanning_) {
-        return false;
-    }
+    if (isScanning_) return false;
+    if (!ensureAdapterReady()) return false;
     
     try {
         {
@@ -65,9 +81,18 @@ bool BluetoothManager::startScanning() {
         adapter_->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
             onPeripheralFound(std::move(peripheral));
         });
+        adapter_->set_callback_on_scan_start([this]() { isScanning_ = true; });
+        adapter_->set_callback_on_scan_stop([this]() { isScanning_ = false; });
         
         adapter_->scan_start();
-        isScanning_ = true;
+        for (int i=0;i<5 && !adapter_->scan_is_active(); ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (!adapter_->scan_is_active()) {
+            try { adapter_->scan_stop(); } catch (...) {}
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            adapter_->scan_start();
+        }
         
         std::cout << "Started continuous Bluetooth LE scanning..." << std::endl;
         std::cout << "Looking for BLE devices (this may take 10-15 seconds)..." << std::endl;
@@ -76,7 +101,16 @@ bool BluetoothManager::startScanning() {
         
     } catch (const std::exception& e) {
         std::cerr << "Failed to start scanning: " << e.what() << std::endl;
-        return false;
+        try {
+            initializeAdapter();
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            adapter_->scan_start();
+            std::cout << "Scan restarted after adapter refresh" << std::endl;
+            return true;
+        } catch (const std::exception& e2) {
+            std::cerr << "Retry failed: " << e2.what() << std::endl;
+            return false;
+        }
     }
 }
 
@@ -287,9 +321,7 @@ bool BluetoothManager::isBitChatDevice(const SimpleBLE::Peripheral& peripheral) 
 }
 
 bool BluetoothManager::connectToDevice(const std::string& address) {
-    if (!adapter_) {
-        return false;
-    }
+    if (!ensureAdapterReady()) return false;
     
     try {
         auto peripherals = adapter_->scan_get_results();

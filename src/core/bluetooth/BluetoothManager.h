@@ -118,6 +118,7 @@ private:
     bool parseEchoDevice(const SimpleBLE::Peripheral& peripheral, DiscoveredDevice& device);
     SimpleBLE::Peripheral* findConnectedPeripheral(const std::string& address);
     void prepareMessagingForPeripheral(SimpleBLE::Peripheral& peripheral);
+    bool ensureAdapterReady();
 };
 
 } // namespace echo
