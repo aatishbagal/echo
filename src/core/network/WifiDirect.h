@@ -8,6 +8,7 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <chrono>
 
 namespace echo {
 
@@ -20,6 +21,7 @@ public:
     void setOnData(std::function<void(const std::string&, const std::vector<uint8_t>&)> cb);
     bool sendTo(const std::string& username, const std::vector<uint8_t>& data);
     bool sendBroadcast(const std::vector<uint8_t>& data);
+    std::vector<std::pair<std::string,std::string>> listPeers();
 
 private:
     struct Peer { std::string ip; uint16_t port; std::chrono::steady_clock::time_point lastSeen; };

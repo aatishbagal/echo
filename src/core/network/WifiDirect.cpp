@@ -2,13 +2,13 @@
 #include <chrono>
 #include <cstring>
 #include <algorithm>
+#include <iostream>
 
 #ifdef __linux__
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <fcntl.h>
 #endif
 
 namespace echo {
@@ -22,6 +22,7 @@ bool WifiDirect::start(const std::string& username, const std::string& fingerpri
     tcpPort_ = tcpPort;
     if (running_) return true;
     running_ = true;
+    std::cout << "[WIFI] start username=" << username_ << " port=" << tcpPort_ << std::endl;
     udpTxThread_ = std::thread([this]() { runUdpTx(); });
     udpRxThread_ = std::thread([this]() { runUdpRx(); });
     tcpServerThread_ = std::thread([this]() { runTcpServer(); });
@@ -31,6 +32,7 @@ bool WifiDirect::start(const std::string& username, const std::string& fingerpri
 void WifiDirect::stop() {
     if (!running_) return;
     running_ = false;
+    std::cout << "[WIFI] stop" << std::endl;
     try { if (udpTxThread_.joinable()) udpTxThread_.join(); } catch (...) {}
     try { if (udpRxThread_.joinable()) udpRxThread_.join(); } catch (...) {}
     try { if (tcpServerThread_.joinable()) tcpServerThread_.join(); } catch (...) {}
@@ -41,8 +43,13 @@ void WifiDirect::setOnData(std::function<void(const std::string&, const std::vec
 bool WifiDirect::sendTo(const std::string& username, const std::vector<uint8_t>& data) {
     std::lock_guard<std::mutex> lock(mtx_);
     auto it = peers_.find(username);
-    if (it == peers_.end()) return false;
-    return sendTcp(it->second.ip, it->second.port, data);
+    if (it == peers_.end()) {
+        std::cout << "[WIFI] sendTo no peer " << username << std::endl;
+        return false;
+    }
+    bool ok = sendTcp(it->second.ip, it->second.port, data);
+    std::cout << (ok ? "[WIFI] sendTo ok " : "[WIFI] sendTo fail ") << username << " " << it->second.ip << ":" << it->second.port << " bytes=" << data.size() << std::endl;
+    return ok;
 }
 
 bool WifiDirect::sendBroadcast(const std::vector<uint8_t>& data) {
@@ -51,15 +58,23 @@ bool WifiDirect::sendBroadcast(const std::vector<uint8_t>& data) {
         std::lock_guard<std::mutex> lock(mtx_);
         for (auto& kv : peers_) targets.emplace_back(kv.second.ip, kv.second.port);
     }
+    std::cout << "[WIFI] broadcast peers=" << targets.size() << " bytes=" << data.size() << std::endl;
     bool any = false;
     for (auto& t : targets) any |= sendTcp(t.first, t.second, data);
     return any;
 }
 
+std::vector<std::pair<std::string,std::string>> WifiDirect::listPeers() {
+    std::vector<std::pair<std::string,std::string>> out;
+    std::lock_guard<std::mutex> lock(mtx_);
+    for (auto& kv : peers_) out.emplace_back(kv.first, kv.second.ip + ":" + std::to_string(kv.second.port));
+    return out;
+}
+
 void WifiDirect::runUdpTx() {
 #ifdef __linux__
     int s = socket(AF_INET, SOCK_DGRAM, 0);
-    if (s < 0) { while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
+    if (s < 0) { std::cout << "[WIFI] udp tx socket fail" << std::endl; while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
     int yes = 1;
     setsockopt(s, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(48270); addr.sin_addr.s_addr = INADDR_BROADCAST;
@@ -80,6 +95,7 @@ void WifiDirect::runUdpTx() {
     }
     close(s);
 #else
+    std::cout << "[WIFI] udp tx disabled on this OS" << std::endl;
     while (running_) std::this_thread::sleep_for(std::chrono::seconds(1));
 #endif
 }
@@ -87,11 +103,11 @@ void WifiDirect::runUdpTx() {
 void WifiDirect::runUdpRx() {
 #ifdef __linux__
     int s = socket(AF_INET, SOCK_DGRAM, 0);
-    if (s < 0) { while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
+    if (s < 0) { std::cout << "[WIFI] udp rx socket fail" << std::endl; while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
     int yes = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(48270); addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) { close(s); while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
+    if (bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) { std::cout << "[WIFI] udp bind fail" << std::endl; close(s); while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
     std::vector<uint8_t> buf(512);
     while (running_) {
         sockaddr_in src{}; socklen_t sl = sizeof(src);
@@ -115,9 +131,11 @@ void WifiDirect::runUdpRx() {
             std::lock_guard<std::mutex> lock(mtx_);
             peers_[u] = p;
         }
+        std::cout << "[WIFI] peer " << u << " " << ip << ":" << port << std::endl;
     }
     close(s);
 #else
+    std::cout << "[WIFI] udp rx disabled on this OS" << std::endl;
     while (running_) std::this_thread::sleep_for(std::chrono::seconds(1));
 #endif
 }
@@ -125,12 +143,13 @@ void WifiDirect::runUdpRx() {
 void WifiDirect::runTcpServer() {
 #ifdef __linux__
     int s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s < 0) { while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
+    if (s < 0) { std::cout << "[WIFI] tcp socket fail" << std::endl; while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
     int yes = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(tcpPort_); addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) { close(s); while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
+    if (bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) { std::cout << "[WIFI] tcp bind fail" << std::endl; close(s); while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
     listen(s, 4);
+    std::cout << "[WIFI] tcp listen port=" << tcpPort_ << std::endl;
     while (running_) {
         sockaddr_in caddr{}; socklen_t cl = sizeof(caddr);
         int c = accept(s, (sockaddr*)&caddr, &cl);
@@ -147,12 +166,14 @@ void WifiDirect::runTcpServer() {
                 if (rr != (ssize_t)len) break;
                 auto cb = onData_;
                 if (cb) cb("wifi", buf);
+                std::cout << "[WIFI] rx bytes=" << buf.size() << std::endl;
             }
             close(c);
         }).detach();
     }
     close(s);
 #else
+    std::cout << "[WIFI] tcp server disabled on this OS" << std::endl;
     while (running_) std::this_thread::sleep_for(std::chrono::seconds(1));
 #endif
 }

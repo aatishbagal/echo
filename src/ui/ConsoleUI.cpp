@@ -127,7 +127,8 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
                 cmd.target = simpleCmd;
             }
         }
-        else if (simpleCmd == "whoami") cmd.type = CommandType::WHOAMI;
+    else if (simpleCmd == "whoami") cmd.type = CommandType::WHOAMI;
+    else if (simpleCmd == "wifi") { cmd.type = CommandType::STATUS; cmd.target = "__wifi_peers"; }
         else if (simpleCmd == "help") cmd.type = CommandType::HELP;
         else if (simpleCmd == "clear" || simpleCmd == "cls") cmd.type = CommandType::CLEAR;
         else if (simpleCmd == "quit" || simpleCmd == "exit") cmd.type = CommandType::QUIT;
@@ -229,10 +230,26 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
             
         case CommandType::STATUS:
             if (!cmd.target.empty()) {
-                std::string addr = cmd.target;
-                if (addr[0] == '@') addr = findAddressByUsername(addr.substr(1), bluetoothManager);
-                if (!addr.empty()) bluetoothManager.debugPrintServices(addr);
-                else std::cout << "Target not found" << std::endl;
+                if (cmd.target == "__wifi_peers") {
+                    if (wifi_) {
+                        auto peers = wifi_->listPeers();
+                        if (peers.empty()) {
+                            std::cout << "No Wi-Fi peers discovered" << std::endl;
+                        } else {
+                            std::cout << "Wi-Fi peers (username -> ip:port):" << std::endl;
+                            for (auto& p : peers) {
+                                std::cout << "  " << p.first << " -> " << p.second << std::endl;
+                            }
+                        }
+                    } else {
+                        std::cout << "Wi-Fi module not initialized" << std::endl;
+                    }
+                } else {
+                    std::string addr = cmd.target;
+                    if (addr[0] == '@') addr = findAddressByUsername(addr.substr(1), bluetoothManager);
+                    if (!addr.empty()) bluetoothManager.debugPrintServices(addr);
+                    else std::cout << "Target not found" << std::endl;
+                }
             } else {
                 if (currentChatMode_ == ChatMode::GLOBAL) {
                     std::cout << "In global chat (#global)" << std::endl;
@@ -371,10 +388,15 @@ void ConsoleUI::sendMessage(const std::string& message, BluetoothManager& blueto
     
     if (isGlobal) {
         auto devices = bluetoothManager.getEchoDevices();
+        size_t okCount = 0;
         for (const auto& device : devices) {
-            bluetoothManager.sendData(device.address, data);
+            if (bluetoothManager.sendData(device.address, data)) okCount++;
         }
-        if (wifi_) wifi_->sendBroadcast(data);
+        std::cout << "[GLOBAL] BLE sent to " << okCount << "/" << devices.size() << " peers" << std::endl;
+        if (wifi_) {
+            bool any = wifi_->sendBroadcast(data);
+            std::cout << "[GLOBAL] WIFI broadcast " << (any ? "ok" : "no peers") << std::endl;
+        }
     } else {
         auto targetAddress = findAddressByUsername(currentChatTarget_, bluetoothManager);
         if (!targetAddress.empty()) {
@@ -382,7 +404,10 @@ void ConsoleUI::sendMessage(const std::string& message, BluetoothManager& blueto
                      << " at " << targetAddress << std::endl;
             bool sent = bluetoothManager.sendData(targetAddress, data);
             if (!sent) {
-                if (wifi_) wifi_->sendTo(currentChatTarget_, data);
+                if (wifi_) {
+                    bool ok = wifi_->sendTo(currentChatTarget_, data);
+                    if (!ok) std::cout << "[INFO] WIFI fallback could not find peer '" << currentChatTarget_ << "'" << std::endl;
+                }
             }
         } else {
             std::cout << "[ERROR] Could not find address for user: " << currentChatTarget_ << std::endl;

@@ -310,7 +310,11 @@ bool BluetoothManager::isBitChatDevice(const SimpleBLE::Peripheral& peripheral) 
     
     auto services = mutable_peripheral.services();
     for (auto& service : services) {
-        if (service.uuid() == BITCHAT_SERVICE_UUID) {
+        std::string su = service.uuid();
+        std::transform(su.begin(), su.end(), su.begin(), ::toupper);
+        std::string target = BITCHAT_SERVICE_UUID;
+        std::transform(target.begin(), target.end(), target.begin(), ::toupper);
+        if (su == target) {
             return true;
         }
     }
@@ -402,12 +406,14 @@ SimpleBLE::Peripheral* BluetoothManager::findConnectedPeripheral(const std::stri
 }
 
 void BluetoothManager::prepareMessagingForPeripheral(SimpleBLE::Peripheral& peripheral) {
+    auto toUpper = [](std::string s){ std::transform(s.begin(), s.end(), s.begin(), ::toupper); return s; };
     auto services = peripheral.services();
     for (auto& service : services) {
-        if (service.uuid() == BITCHAT_SERVICE_UUID) {
+        if (toUpper(service.uuid()) == toUpper(BITCHAT_SERVICE_UUID)) {
             auto characteristics = service.characteristics();
             for (auto& characteristic : characteristics) {
-                if (characteristic.uuid() == BITCHAT_RX_CHAR_UUID || characteristic.uuid() == BITCHAT_MESH_CHAR_UUID) {
+                std::string cu = toUpper(characteristic.uuid());
+                if (cu == toUpper(BITCHAT_RX_CHAR_UUID) || cu == toUpper(BITCHAT_MESH_CHAR_UUID)) {
                     if (characteristic.can_notify()) {
                         peripheral.notify(service.uuid(), characteristic.uuid(), [this, addr = peripheral.address()](SimpleBLE::ByteArray payload) {
                             std::vector<uint8_t> data(payload.begin(), payload.end());
@@ -554,25 +560,44 @@ bool BluetoothManager::isAdvertising() const {
 }
 
 bool BluetoothManager::sendData(const std::string& address, const std::vector<uint8_t>& data) {
-    std::lock_guard<std::mutex> lock(devicesMutex_);
-    auto* peripheral = findConnectedPeripheral(address);
-    if (!peripheral || !peripheral->is_connected()) {
-        std::cerr << "[SEND FAILED] Device " << address << " not connected" << std::endl;
-        return false;
+    SimpleBLE::Peripheral* peripheral = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(devicesMutex_);
+        peripheral = findConnectedPeripheral(address);
     }
-    
+    if (!peripheral || !peripheral->is_connected()) {
+        std::cout << "[SEND] Not connected to " << address << ", attempting to connect" << std::endl;
+        if (!connectToDevice(address)) {
+            std::cerr << "[SEND FAILED] Device " << address << " not connected" << std::endl;
+            return false;
+        }
+        {
+            std::lock_guard<std::mutex> lock(devicesMutex_);
+            peripheral = findConnectedPeripheral(address);
+        }
+        if (!peripheral || !peripheral->is_connected()) {
+            std::cerr << "[SEND FAILED] Could not acquire connection to " << address << std::endl;
+            return false;
+        }
+    }
+
     try {
+        auto toUpper = [](std::string s){ std::transform(s.begin(), s.end(), s.begin(), ::toupper); return s; };
         auto services = peripheral->services();
         for (auto& service : services) {
-            if (service.uuid() == BITCHAT_SERVICE_UUID) {
+            if (toUpper(service.uuid()) == toUpper(BITCHAT_SERVICE_UUID)) {
                 auto characteristics = service.characteristics();
                 for (auto& characteristic : characteristics) {
-                    if (characteristic.uuid() == BITCHAT_TX_CHAR_UUID) {
+                    std::string cu = toUpper(characteristic.uuid());
+                    if (cu == toUpper(BITCHAT_TX_CHAR_UUID) && characteristic.can_write_request()) {
                         peripheral->write_request(service.uuid(), characteristic.uuid(), data);
                         std::cout << "[SENT] " << data.size() << " bytes to " << address << std::endl;
                         return true;
                     }
-                    if (characteristic.uuid() == BITCHAT_RX_CHAR_UUID && characteristic.can_write_request()) {
+                }
+                for (auto& characteristic : characteristics) {
+                    std::string cu = toUpper(characteristic.uuid());
+                    if (cu == toUpper(BITCHAT_RX_CHAR_UUID) && characteristic.can_write_request()) {
                         peripheral->write_request(service.uuid(), characteristic.uuid(), data);
                         std::cout << "[SENT] " << data.size() << " bytes to " << address << std::endl;
                         return true;
@@ -580,7 +605,7 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
                 }
             }
         }
-        
+
         std::cerr << "[SEND FAILED] No TX characteristic found for " << address << std::endl;
         std::cerr << "[DEBUG] Available services and characteristics for " << address << ":" << std::endl;
         for (auto& service : services) {
@@ -589,11 +614,11 @@ bool BluetoothManager::sendData(const std::string& address, const std::vector<ui
                 std::cerr << "    Char: " << ch.uuid() << std::endl;
             }
         }
-        
+
     } catch (const std::exception& e) {
         std::cerr << "Failed to send data to " << address << ": " << e.what() << std::endl;
     }
-    
+
     return false;
 }
 
