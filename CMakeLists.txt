@@ -9,13 +9,41 @@ if(WIN32)
     # Windows-specific settings
     add_definitions(-DWIN32_LEAN_AND_MEAN)
     add_definitions(-DNOMINMAX)
+    
+    # Try vcpkg first for Windows
+    if(DEFINED ENV{VCPKG_ROOT})
+        set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
+    endif()
 elseif(UNIX AND NOT APPLE)
-    # Linux-specific settings
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBSODIUM REQUIRED libsodium)
     pkg_check_modules(LZ4 REQUIRED liblz4)
 elseif(APPLE)
-    # macOS-specific settings
+    find_library(COREBLUETOOTH_LIBRARY CoreBluetooth REQUIRED)
+    find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
+    
+    if(NOT LIBSODIUM_FOUND)
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(LIBSODIUM libsodium)
+        endif()
+    endif()
+    
+    if(NOT LIBSODIUM_FOUND)
+        find_library(LIBSODIUM_LIBRARY NAMES sodium libsodium)
+        find_path(LIBSODIUM_INCLUDE_DIR sodium.h)
+        if(LIBSODIUM_LIBRARY AND LIBSODIUM_INCLUDE_DIR)
+            set(LIBSODIUM_LIBRARIES ${LIBSODIUM_LIBRARY})
+            set(LIBSODIUM_INCLUDE_DIRS ${LIBSODIUM_INCLUDE_DIR})
+        endif()
+    endif()
+    
+    find_library(LZ4_LIBRARY NAMES lz4 liblz4)
+    find_path(LZ4_INCLUDE_DIR lz4.h)
+    if(LZ4_LIBRARY AND LZ4_INCLUDE_DIR)
+        set(LZ4_LIBRARIES ${LZ4_LIBRARY})
+        set(LZ4_INCLUDE_DIRS ${LZ4_INCLUDE_DIR})
+    endif()
 endif()
 
 # Find common packages
@@ -35,17 +63,40 @@ endif()
 # Include directories
 include_directories(src)
 
-# Source files (start minimal, expand as we build)
+# Source files
 set(SOURCES
     src/main.cpp
     src/core/bluetooth/BluetoothManager.cpp
+    src/core/crypto/UserIdentity.cpp
+    src/core/protocol/MessageTypes.cpp
+    src/core/commands/IRCParser.cpp
     src/ui/ConsoleUI.cpp
+    src/core/network/WifiDirect.cpp
 )
 
-# Create executable
+if(WIN32)
+    list(APPEND SOURCES
+        src/core/bluetooth/WindowsAdvertiser.cpp
+    )
+endif()
+
+if(UNIX AND NOT APPLE)
+    list(APPEND SOURCES
+        src/core/bluetooth/BluezAdvertiser.cpp
+    )
+endif()
+
+if(APPLE)
+    list(APPEND SOURCES
+        src/core/bluetooth/MacOSAdvertiser.mm
+    )
+    set_source_files_properties(src/core/bluetooth/MacOSAdvertiser.mm PROPERTIES
+        COMPILE_FLAGS "-x objective-c++"
+    )
+endif()
+
 add_executable(echo ${SOURCES})
 
-# Link libraries
 target_link_libraries(echo ${SIMPLEBLE_TARGET})
 
 if(UNIX AND NOT APPLE)
@@ -54,19 +105,45 @@ if(UNIX AND NOT APPLE)
         ${LZ4_LIBRARIES}
         OpenSSL::SSL 
         OpenSSL::Crypto
+        pthread
     )
     target_compile_options(echo PRIVATE ${LIBSODIUM_CFLAGS_OTHER})
 elseif(WIN32)
-    # Windows libraries will be added via vcpkg
     target_link_libraries(echo
         OpenSSL::SSL 
         OpenSSL::Crypto
+        windowsapp
     )
+    
+    if(DEFINED VCPKG_TARGET_TRIPLET)
+        find_package(unofficial-sodium CONFIG REQUIRED)
+        find_package(lz4 CONFIG REQUIRED)
+        target_link_libraries(echo
+            unofficial-sodium::sodium
+            lz4::lz4
+        )
+    endif()
+elseif(APPLE)
+    target_link_libraries(echo
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        ${COREBLUETOOTH_LIBRARY}
+        ${FOUNDATION_LIBRARY}
+    )
+    
+    if(LIBSODIUM_LIBRARIES)
+        target_link_libraries(echo ${LIBSODIUM_LIBRARIES})
+        target_include_directories(echo PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
+    endif()
+    
+    if(LZ4_LIBRARIES)
+        target_link_libraries(echo ${LZ4_LIBRARIES})
+        target_include_directories(echo PRIVATE ${LZ4_INCLUDE_DIRS})
+    endif()
 endif()
 
-# Compiler-specific options
 if(MSVC)
-    target_compile_options(echo PRIVATE /W4)
+    target_compile_options(echo PRIVATE /W4 /await)
 else()
     target_compile_options(echo PRIVATE -Wall -Wextra -Wpedantic)
 endif()

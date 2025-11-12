@@ -65,7 +65,7 @@ sudo apt install build-essential cmake git libbluetooth-dev libsodium-dev libssl
 vcpkg install libsodium:x64-windows openssl:x64-windows lz4:x64-windows
 
 # Clone and build with Visual Studio or MinGW
-git clone <your-repo-url> echo
+git clone https://github.com/aatishbagal/echo.git echo
 cd echo
 git submodule add https://github.com/OpenBluetoothToolbox/SimpleBLE.git external/simpleble
 git submodule update --init --recursive
