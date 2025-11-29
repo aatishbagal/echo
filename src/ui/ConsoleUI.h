@@ -53,12 +53,12 @@ private:
     void printEchoDevices(const BluetoothManager& bluetoothManager) const;
     
     void onDeviceDiscovered(const DiscoveredDevice& device);
-    void onDeviceConnected(const std::string& address);
+    void onDeviceConnected(const std::string& address, const BluetoothManager& bluetoothManager);
     void onDeviceDisconnected(const std::string& address);
     void onDataReceived(const std::string& address, const std::vector<uint8_t>& data);
-    
+
     void processReceivedMessage(const Message& msg, const std::string& sourceAddress);
-    
+
     std::string findUsernameByAddress(const std::string& address, const BluetoothManager& bluetoothManager) const;
     std::string findAddressByUsername(const std::string& username, const BluetoothManager& bluetoothManager) const;
     bool connectByTarget(const std::string& target, BluetoothManager& bluetoothManager);
@@ -73,4 +73,4 @@ private:
     static constexpr size_t MAX_FILE_BYTES = 32768;
 };
 
-} // namespace echo
+}

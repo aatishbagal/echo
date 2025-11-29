@@ -10,14 +10,13 @@
 #include "ui/ConsoleUI.h"
 
 int main(int argc, char* argv[]) {
-    (void)argc; // Suppress unused parameter warning
-    (void)argv; // Suppress unused parameter warning
+    (void)argc;
+    (void)argv;
     
     std::cout << "Echo - BitChat Compatible Desktop Messaging" << std::endl;
     std::cout << "============================================" << std::endl;
     
     try {
-        // Load or create user identity
         std::string identityPath = "echo_identity.dat";
         echo::UserIdentity identity;
         
@@ -37,28 +36,23 @@ int main(int argc, char* argv[]) {
                 std::cout << "Identity saved to " << identityPath << std::endl;
             }
         }
-        
-        // Display identity
+
         std::cout << "\nYour Echo Identity:" << std::endl;
         std::cout << "  Username: " << identity.getUsername() << std::endl;
         std::cout << "  Fingerprint: " << identity.getFingerprint() << std::endl;
         std::cout << std::endl;
-        
-        // Initialize Bluetooth manager
+
         auto bluetoothManager = std::make_unique<echo::BluetoothManager>();
-        
-        // Initialize console UI
+
         auto consoleUI = std::make_unique<echo::ConsoleUI>();
-        
-        // Check if Bluetooth is available
+
         if (!bluetoothManager->isBluetoothAvailable()) {
             std::cerr << "Error: Bluetooth is not available on this system" << std::endl;
             return 1;
         }
         
         std::cout << "Bluetooth initialized successfully" << std::endl;
-        
-        // Start advertising Echo presence
+
         std::cout << "\nStarting Echo advertising..." << std::endl;
         if (bluetoothManager->startEchoAdvertising(identity.getUsername(), identity.getFingerprint())) {
             std::cout << "Now visible to other Echo devices" << std::endl;
@@ -66,8 +60,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Warning: Could not start advertising (scanning will still work)" << std::endl;
         }
         std::cout << std::endl;
-        
-        // Start the application main loop
+
         consoleUI->run(*bluetoothManager, identity);
         
     } catch (const std::exception& e) {
