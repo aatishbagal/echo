@@ -255,13 +255,27 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
             }
             break;
 
-        case CommandType::WHOAMI: {
+        case CommandType::WHO:
+            printEchoDevices(bluetoothManager);
+            break;
+
+        case CommandType::WHOAMI:
             std::cout << "\n=== Your Identity ===" << std::endl;
             std::cout << "Username: " << identity.getUsername() << std::endl;
             std::cout << "Fingerprint: " << identity.getFingerprint() << std::endl;
             std::cout << "=====================\n" << std::endl;
             break;
-        }
+
+        case CommandType::NICK:
+            if (!cmd.target.empty()) {
+                identity.setUsername(cmd.target);
+                identity.saveToFile("echo_identity.dat");
+                std::cout << "Username changed to: " << cmd.target << std::endl;
+                std::cout << "Note: Restart Echo for the new name to be advertised" << std::endl;
+            } else {
+                std::cout << "Usage: /nick <new_username>" << std::endl;
+            }
+            break;
 
         case CommandType::CLEAR:
             clearScreen();
@@ -343,25 +357,18 @@ void ConsoleUI::handleChatMode(const std::string& input, BluetoothManager& bluet
             }
             std::cout << "===================\n" << std::endl;
         } else if (currentChatMode_ == ChatMode::PERSONAL) {
-            std::cout << "\n=== Chat Participants ===" << std::endl;
-            std::cout << "  You" << std::endl;
-            std::cout << "  " << currentChatTarget_ << std::endl;
-            std::cout << "========================\n" << std::endl;
+            std::cout << "Chatting with: " << currentChatTarget_ << std::endl;
         }
         std::cout << getPrompt();
         return;
     }
 
     if (input == "/status") {
-        std::cout << "\n=== Chat Status ===" << std::endl;
         if (currentChatMode_ == ChatMode::GLOBAL) {
-            std::cout << "Mode: Global Chat" << std::endl;
-            std::cout << "Channel: #global" << std::endl;
+            std::cout << "In global chat (#global)" << std::endl;
         } else if (currentChatMode_ == ChatMode::PERSONAL) {
-            std::cout << "Mode: Personal Chat" << std::endl;
-            std::cout << "With: " << currentChatTarget_ << std::endl;
+            std::cout << "In personal chat with: " << currentChatTarget_ << std::endl;
         }
-        std::cout << "==================\n" << std::endl;
         std::cout << getPrompt();
         return;
     }
