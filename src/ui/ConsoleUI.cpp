@@ -173,20 +173,37 @@ void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& blue
                             wifi_->start(identity.getUsername(), identity.getFingerprint());
                         }
                         wifi_->setVerbose(true);
-                        std::cout << "wifi verbose on" << std::endl;
+                        std::cout << "WiFi verbose mode enabled" << std::endl;
+                        std::cout << "Local IP: " << (wifi_ ? wifi_->getLocalIp() : "unknown") << std::endl;
+                        std::cout << "TCP Port: " << (wifi_ ? std::to_string(wifi_->getPort()) : "unknown") << std::endl;
                         return;
                     } else if (sub == "stop") {
                         if (wifi_) wifi_->setVerbose(false);
-                        std::cout << "wifi verbose off" << std::endl;
+                        std::cout << "WiFi verbose mode disabled" << std::endl;
                         return;
                     } else if (sub == "peers") {
                         cmd.type = CommandType::STATUS; cmd.target = "__wifi_peers";
+                    } else if (sub == "status") {
+                        if (wifi_) {
+                            std::cout << "\n=== WiFi Status ===" << std::endl;
+                            std::cout << "Local IP: " << wifi_->getLocalIp() << std::endl;
+                            std::cout << "TCP Port: " << wifi_->getPort() << std::endl;
+                            auto peers = wifi_->listPeers();
+                            std::cout << "Peers discovered: " << peers.size() << std::endl;
+                            for (auto& p : peers) {
+                                std::cout << "  " << p.first << " at " << p.second << std::endl;
+                            }
+                            std::cout << "===================" << std::endl;
+                        } else {
+                            std::cout << "WiFi not initialized" << std::endl;
+                        }
+                        return;
                     } else {
-                        std::cout << "wifi start|stop|peers" << std::endl;
+                        std::cout << "wifi start|stop|peers|status" << std::endl;
                         return;
                     }
                 } else {
-                    std::cout << "wifi start|stop|peers" << std::endl;
+                    std::cout << "wifi start|stop|peers|status" << std::endl;
                     return;
                 }
             }
