@@ -114,8 +114,16 @@ void WifiDirect::runUdpTx() {
     if (s < 0) { if (verbose_) std::cout << "[WIFI] udp tx socket fail" << std::endl; while (running_) std::this_thread::sleep_for(std::chrono::seconds(1)); return; }
     int yes = 1;
     setsockopt(s, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
+    std::string localIp = getLocalIp();
+    sockaddr_in localAddr{}; localAddr.sin_family = AF_INET; localAddr.sin_port = 0;
+    inet_aton(localIp.c_str(), &localAddr.sin_addr);
+    if (bind(s, (sockaddr*)&localAddr, sizeof(localAddr)) < 0) {
+        if (verbose_) std::cout << "[WIFI] TX bind to " << localIp << " failed, using default" << std::endl;
+    } else {
+        if (verbose_) std::cout << "[WIFI] TX bound to interface: " << localIp << std::endl;
+    }
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(48270); addr.sin_addr.s_addr = INADDR_BROADCAST;
-    if (verbose_) std::cout << "[WIFI] UDP TX broadcasting to 255.255.255.255:48270" << std::endl;
+    if (verbose_) std::cout << "[WIFI] UDP TX broadcasting to 255.255.255.255:48270 from " << localIp << std::endl;
     while (running_) {
         std::string u = username_;
         std::string f = fingerprint_;
@@ -139,8 +147,16 @@ void WifiDirect::runUdpTx() {
     if (s == INVALID_SOCKET) { if (verbose_) std::cout << "[WIFI] udp tx socket fail" << std::endl; WSACleanup(); return; }
     BOOL yes = TRUE;
     setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&yes, sizeof(yes));
+    std::string localIp = getLocalIp();
+    sockaddr_in localAddr{}; localAddr.sin_family = AF_INET; localAddr.sin_port = 0;
+    inet_pton(AF_INET, localIp.c_str(), &localAddr.sin_addr);
+    if (bind(s, (sockaddr*)&localAddr, sizeof(localAddr)) == SOCKET_ERROR) {
+        if (verbose_) std::cout << "[WIFI] TX bind to " << localIp << " failed (error " << WSAGetLastError() << "), using default" << std::endl;
+    } else {
+        if (verbose_) std::cout << "[WIFI] TX bound to interface: " << localIp << std::endl;
+    }
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(48270); addr.sin_addr.s_addr = INADDR_BROADCAST;
-    if (verbose_) std::cout << "[WIFI] UDP TX broadcasting to 255.255.255.255:48270" << std::endl;
+    if (verbose_) std::cout << "[WIFI] UDP TX broadcasting to 255.255.255.255:48270 from " << localIp << std::endl;
     while (running_) {
         std::string u = username_;
         std::string f = fingerprint_;
@@ -206,7 +222,7 @@ void WifiDirect::runUdpRx() {
             std::lock_guard<std::mutex> lock(mtx_);
             peers_[u] = p;
         }
-    std::cout << "[WIFI] ✓ Discovered peer: " << u << " at " << ip << ":" << port << std::endl;
+    if (verbose_) std::cout << "[WIFI] ✓ Discovered peer: " << u << " at " << ip << ":" << port << std::endl;
     }
     close(s);
 #elif defined(_WIN32)
@@ -246,7 +262,7 @@ void WifiDirect::runUdpRx() {
             std::lock_guard<std::mutex> lock(mtx_);
             peers_[u] = p;
         }
-        std::cout << "[WIFI] ✓ Discovered peer: " << u << " at " << ip << ":" << port << std::endl;
+        if (verbose_) std::cout << "[WIFI] ✓ Discovered peer: " << u << " at " << ip << ":" << port << std::endl;
     }
     closesocket(s);
     WSACleanup();
