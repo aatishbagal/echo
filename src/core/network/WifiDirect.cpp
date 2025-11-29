@@ -140,6 +140,7 @@ void WifiDirect::runUdpTx() {
     BOOL yes = TRUE;
     setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&yes, sizeof(yes));
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(48270); addr.sin_addr.s_addr = INADDR_BROADCAST;
+    if (verbose_) std::cout << "[WIFI] UDP TX broadcasting to 255.255.255.255:48270" << std::endl;
     while (running_) {
         std::string u = username_;
         std::string f = fingerprint_;
@@ -152,7 +153,14 @@ void WifiDirect::runUdpTx() {
         buf.insert(buf.end(), f.begin(), f.end());
         buf.push_back((uint8_t)(port >> 8));
         buf.push_back((uint8_t)(port & 0xFF));
-        sendto(s, (const char*)buf.data(), (int)buf.size(), 0, (sockaddr*)&addr, sizeof(addr));
+        int sent = sendto(s, (const char*)buf.data(), (int)buf.size(), 0, (sockaddr*)&addr, sizeof(addr));
+        if (verbose_) {
+            if (sent == SOCKET_ERROR) {
+                std::cout << "[WIFI] TX ERROR: " << WSAGetLastError() << " broadcasting " << u << std::endl;
+            } else {
+                std::cout << "[WIFI] TX broadcast " << u << " (" << sent << "/" << buf.size() << " bytes)" << std::endl;
+            }
+        }
         std::this_thread::sleep_for(std::chrono::seconds(2));
     }
     closesocket(s);
@@ -207,34 +215,38 @@ void WifiDirect::runUdpRx() {
     if (s == INVALID_SOCKET) { if (verbose_) std::cout << "[WIFI] udp rx socket fail" << std::endl; WSACleanup(); return; }
     BOOL yes = TRUE;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&yes, sizeof(yes));
+    setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&yes, sizeof(yes));
     DWORD tv = 1000; setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(48270); addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) { if (verbose_) std::cout << "[WIFI] udp bind fail" << std::endl; closesocket(s); WSACleanup(); return; }
+    if (verbose_) std::cout << "[WIFI] UDP RX listening on 0.0.0.0:48270" << std::endl;
     std::vector<uint8_t> buf(512);
     while (running_) {
         sockaddr_in src{}; int sl = sizeof(src);
         int n = recvfrom(s, (char*)buf.data(), (int)buf.size(), 0, (sockaddr*)&src, &sl);
         if (n <= 0) continue;
-        if (buf[0] != 1) continue;
+        char ipstr[INET_ADDRSTRLEN] = {0}; inet_ntop(AF_INET, &src.sin_addr, ipstr, INET_ADDRSTRLEN);
+        std::string srcIp = ipstr[0] ? ipstr : "";
+        if (verbose_) std::cout << "[WIFI] RX packet from " << srcIp << " size=" << n << std::endl;
+        if (buf[0] != 1) { if (verbose_) std::cout << "[WIFI] Invalid version: " << (int)buf[0] << std::endl; continue; }
         size_t i = 1;
         if (i >= (size_t)n) continue;
         uint8_t ulen = buf[i++];
-        if (i + ulen > (size_t)n) continue;
+        if (i + ulen > (size_t)n) { if (verbose_) std::cout << "[WIFI] Invalid username length" << std::endl; continue; }
         std::string u((char*)&buf[i], (char*)&buf[i+ulen]); i += ulen;
         if (i >= (size_t)n) continue;
         uint8_t flen = buf[i++];
-        if (i + flen + 2 > (size_t)n) continue;
+        if (i + flen + 2 > (size_t)n) { if (verbose_) std::cout << "[WIFI] Invalid fingerprint length" << std::endl; continue; }
         std::string f((char*)&buf[i], (char*)&buf[i+flen]); i += flen;
         uint16_t port = ((uint16_t)buf[i] << 8) | buf[i+1];
-        char ipstr[INET_ADDRSTRLEN] = {0}; inet_ntop(AF_INET, &src.sin_addr, ipstr, INET_ADDRSTRLEN);
-        std::string ip = ipstr[0] ? ipstr : "";
-        if (u == username_) continue;
+        std::string ip = srcIp;
+        if (u == username_) { if (verbose_) std::cout << "[WIFI] Ignoring own broadcast" << std::endl; continue; }
         Peer p; p.ip = ip; p.port = port; p.lastSeen = std::chrono::steady_clock::now();
         {
             std::lock_guard<std::mutex> lock(mtx_);
             peers_[u] = p;
         }
-        if (verbose_) std::cout << "[WIFI] peer " << u << " " << ip << ":" << port << std::endl;
+        std::cout << "[WIFI] ✓ Discovered peer: " << u << " at " << ip << ":" << port << std::endl;
     }
     closesocket(s);
     WSACleanup();
