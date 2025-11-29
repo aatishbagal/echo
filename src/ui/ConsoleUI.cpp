@@ -456,7 +456,8 @@ void ConsoleUI::sendMessage(const std::string& message, BluetoothManager& blueto
             sent = bluetoothManager.sendData(device.address, data) || sent;
         }
 
-        displayMessage("You", message, false);
+        std::cout << "[#global][You]: " << message << std::endl;
+        addToHistory("[#global][You]: " + message);
 
     } else if (currentChatMode_ == ChatMode::PERSONAL) {
         auto msg = MessageFactory::createTextMessage(
@@ -479,7 +480,8 @@ void ConsoleUI::sendMessage(const std::string& message, BluetoothManager& blueto
             sent = bluetoothManager.sendData(address, data) || sent;
         }
 
-        displayMessage("You", message, true);
+        std::cout << "[You]: " << message << std::endl;
+        addToHistory("[You]: " + message);
     }
 }
 
@@ -490,7 +492,7 @@ void ConsoleUI::displayMessage(const std::string& from, const std::string& messa
     if (isPrivate) {
         formattedMsg = "[" + from + "]: " + message;
     } else {
-        formattedMsg = "[#global][" + from + "]: " + message;
+        formattedMsg = "[" + from + "]: " + message;
     }
 
     std::cout << formattedMsg << std::endl;
@@ -644,14 +646,18 @@ void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& so
 
         if (textMsg.isGlobal && currentChatMode_ == ChatMode::GLOBAL) {
             std::string indicator = (sourceAddress == "wifi") ? " [LAN]" : "";
-            displayMessage(textMsg.senderUsername + indicator, textMsg.content, false);
+            std::string displayName = textMsg.senderUsername + indicator;
+            std::cout << "[#global][" << displayName << "]: " << textMsg.content << std::endl;
+            addToHistory("[#global][" + displayName + "]: " + textMsg.content);
             std::cout << getPrompt();
             std::cout.flush();
         } else if (!textMsg.isGlobal) {
             if (currentChatMode_ == ChatMode::PERSONAL &&
                 currentChatTarget_ == textMsg.senderUsername) {
                 std::string indicator = (sourceAddress == "wifi") ? " [LAN]" : "";
-                displayMessage(textMsg.senderUsername + indicator, textMsg.content, true);
+                std::string displayName = textMsg.senderUsername + indicator;
+                std::cout << "[" << displayName << "]: " << textMsg.content << std::endl;
+                addToHistory("[" + displayName + "]: " + textMsg.content);
             } else {
                 std::string indicator = (sourceAddress == "wifi") ? " [LAN]" : "";
                 std::cout << "\n[NEW MESSAGE from " << textMsg.senderUsername << indicator << "]: "

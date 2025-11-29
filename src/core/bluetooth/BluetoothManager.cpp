@@ -68,22 +68,25 @@ bool BluetoothManager::isBluetoothAvailable() const {
     return adapter_ != nullptr && adapter_->initialized();
 }
 
-bool BluetoothManager::startScanning() {
-    if (isScanning_) return false;
+    bool BluetoothManager::startScanning() {
+    if (isScanning_) {
+        std::cout << "Already scanning" << std::endl;
+        return true;
+    }
     if (!ensureAdapterReady()) return false;
-    
+
     try {
         {
             std::lock_guard<std::mutex> lock(devicesMutex_);
             discoveredDevices_.clear();
         }
-        
+
         adapter_->set_callback_on_scan_found([this](SimpleBLE::Peripheral peripheral) {
             onPeripheralFound(std::move(peripheral));
         });
         adapter_->set_callback_on_scan_start([this]() { isScanning_ = true; });
         adapter_->set_callback_on_scan_stop([this]() { isScanning_ = false; });
-        
+
         adapter_->scan_start();
         for (int i=0;i<5 && !adapter_->scan_is_active(); ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -93,27 +96,25 @@ bool BluetoothManager::startScanning() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             adapter_->scan_start();
         }
-        
+
         std::cout << "Started continuous Bluetooth LE scanning..." << std::endl;
         std::cout << "Looking for BLE devices (this may take 10-15 seconds)..." << std::endl;
         std::cout << "Echo devices will be automatically connected for messaging" << std::endl;
+        isScanning_ = true;
         return true;
-        
+
     } catch (const std::exception& e) {
-        std::cerr << "Failed to start scanning: " << e.what() << std::endl;
-        try {
-            initializeAdapter();
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            adapter_->scan_start();
-            std::cout << "Scan restarted after adapter refresh" << std::endl;
+        std::string errorMsg = e.what();
+        if (errorMsg.find("InProgress") != std::string::npos ||
+            errorMsg.find("already in progress") != std::string::npos) {
+            std::cout << "Bluetooth scanning already active (possibly from advertiser)" << std::endl;
+            isScanning_ = true;
             return true;
-        } catch (const std::exception& e2) {
-            std::cerr << "Retry failed: " << e2.what() << std::endl;
-            return false;
-        }
+            }
+        std::cerr << "Failed to start scanning: " << e.what() << std::endl;
+        return false;
     }
 }
-
 void BluetoothManager::stopScanning() {
     if (!adapter_ || !isScanning_) {
         return;
