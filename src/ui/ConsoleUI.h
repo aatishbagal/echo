@@ -15,43 +15,49 @@ namespace echo {
 class UserIdentity;
 class WifiDirect;
 
+struct PendingFile {
+    std::string filename;
+    std::string base64data;
+    std::string senderUsername;
+};
+
 class ConsoleUI {
 public:
     ConsoleUI();
     ~ConsoleUI();
-    
+
     void run(BluetoothManager& bluetoothManager, UserIdentity& identity);
-    
+
 private:
     std::atomic<bool> running_;
     IRCParser commandParser_;
     ChatMode currentChatMode_;
     std::string currentChatTarget_;
     std::unique_ptr<WifiDirect> wifi_;
-    
+
     std::deque<std::string> messageHistory_;
     std::mutex historyMutex_;
     static constexpr size_t MAX_HISTORY = 100;
-    
+
     void printHelp() const;
     void printChatHelp() const;
     void handleCommand(const std::string& command, BluetoothManager& bluetoothManager, UserIdentity& identity);
     void handleChatMode(const std::string& input, BluetoothManager& bluetoothManager, UserIdentity& identity);
-    
+
     void enterPersonalChat(const std::string& username, BluetoothManager& bluetoothManager);
     void enterGlobalChat(BluetoothManager& bluetoothManager);
     void exitChatMode();
-    
+
     void sendMessage(const std::string& message, BluetoothManager& bluetoothManager, UserIdentity& identity);
     void displayMessage(const std::string& from, const std::string& message, bool isPrivate);
-    
+
     void addToHistory(const std::string& message);
     void clearScreen() const;
     std::string getPrompt() const;
-    
+
     void printDevices(const BluetoothManager& bluetoothManager) const;
     void printEchoDevices(const BluetoothManager& bluetoothManager) const;
-    
+
     void onDeviceDiscovered(const DiscoveredDevice& device);
     void onDeviceConnected(const std::string& address, const BluetoothManager& bluetoothManager);
     void onDeviceDisconnected(const std::string& address);
@@ -69,7 +75,7 @@ private:
     std::string base64Encode(const std::vector<uint8_t>& data);
     std::vector<uint8_t> base64Decode(const std::string& encoded);
     std::string generateFileId();
-    std::unordered_map<std::string, std::pair<std::string,std::string>> pendingFiles_;
+    std::unordered_map<std::string, PendingFile> pendingFiles_;
     static constexpr size_t MAX_FILE_BYTES = 32768;
 };
 

@@ -4,9 +4,9 @@
 
 Echo now has **full BLE advertising support on macOS** using CoreBluetooth's CBPeripheralManager:
 
-- ✅ **Scanning**: Can detect other Echo devices (Linux/Windows/macOS)
-- ✅ **Advertising**: Can broadcast presence (fully discoverable)
-- ✅ **Full Mesh**: Complete mesh network node
+-  **Scanning**: Can detect other Echo devices (Linux/Windows/macOS)
+-  **Advertising**: Can broadcast presence (fully discoverable)
+-  **Full Mesh**: Complete mesh network node
 
 ## Prerequisites
 
@@ -153,15 +153,6 @@ All standard Echo commands work:
 - `/nick <name>` - Change username
 - `help` - Show commands
 - `quit` - Exit
-
-## Platform Comparison
-
-| Feature | Linux | Windows | macOS |
-|---------|-------|---------|-------|
-| Scanning | ✅ | ✅ | ✅ |
-| Advertising | ✅ | ✅ | ✅ |
-| Discoverable | ✅ | ✅ | ✅ |
-| Full Mesh | ✅ | ✅ | ✅ |
 
 ## Technical Details
 

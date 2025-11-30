@@ -652,7 +652,11 @@ void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& so
                 std::string filename = textMsg.content.substr(a + 2, b - (a + 2));
                 std::string ssize = textMsg.content.substr(b + 2, c - (b + 2));
                 std::string b64 = textMsg.content.substr(c + 2);
-                pendingFiles_[id] = {filename, b64};
+                PendingFile pf;
+                pf.filename = filename;
+                pf.base64data = b64;
+                pf.senderUsername = textMsg.senderUsername;
+                pendingFiles_[id] = pf;
                 std::cout << "\n[FILE] from " << textMsg.senderUsername << ": " << filename << " bytes=" << ssize << " id=" << id << std::endl;
                 std::cout << "Use /accept " << id << " or /decline " << id << std::endl;
                 std::cout << getPrompt();
@@ -718,8 +722,9 @@ bool ConsoleUI::handleFileSend(const std::string& path, BluetoothManager& blueto
 void ConsoleUI::handleFileAccept(const std::string& id) {
     auto it = pendingFiles_.find(id);
     if (it == pendingFiles_.end()) { std::cout << "No such file id" << std::endl; return; }
-    std::string filename = it->second.first;
-    std::string b64 = it->second.second;
+    std::string filename = it->second.filename;
+    std::string b64 = it->second.base64data;
+    std::string sender = it->second.senderUsername;
     auto data = base64Decode(b64);
     if (data.empty() || data.size() > MAX_FILE_BYTES) { std::cout << "Invalid file" << std::endl; pendingFiles_.erase(it); return; }
     std::filesystem::path dir = std::filesystem::current_path() / "FileSharing";
@@ -731,7 +736,7 @@ void ConsoleUI::handleFileAccept(const std::string& id) {
     if (!f) { std::cout << "Save failed" << std::endl; return; }
     fwrite(data.data(), 1, data.size(), f);
     fclose(f);
-    std::cout << "Saved " << out.string() << std::endl;
+    std::cout << "[File Sharing][" << sender << "] Saved to: " << out.string() << std::endl;
     pendingFiles_.erase(id);
 }
 
