@@ -28,4 +28,5 @@ Thumbs.db
 *.tmp
 *.log
 
+/FileSharing
 echo_identity.dat
