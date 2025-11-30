@@ -6,12 +6,8 @@
 #include <iomanip>
 #include <cstring>
 
-// For now, we'll use simple random generation
-// TODO: Integrate libsodium for proper Ed25519 keypairs
-
 namespace echo {
 
-// Random username word lists
 namespace UsernameLists {
     const std::vector<std::string> adjectives = {
         "Swift", "Quiet", "Bright", "Dark", "Silent", "Loud", "Quick", "Slow",
@@ -33,13 +29,13 @@ namespace UsernameLists {
 }
 
 UserIdentity::UserIdentity() {
-    // Initialize with zeros
+
     publicKey_.fill(0);
     privateKey_.fill(0);
 }
 
 UserIdentity::~UserIdentity() {
-    // Clear sensitive data
+
     privateKey_.fill(0);
 }
 
@@ -65,8 +61,6 @@ std::string UserIdentity::generateRandomUsername() {
 }
 
 void UserIdentity::generateKeypair() {
-    // TODO: Use libsodium crypto_sign_keypair() for proper Ed25519
-    // For now, generate random bytes (INSECURE - for testing only!)
     
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -82,8 +76,6 @@ void UserIdentity::generateKeypair() {
 }
 
 void UserIdentity::updateFingerprint() {
-    // TODO: Use proper SHA-256 from libsodium or OpenSSL
-    // For now, create a simple hex representation of first 16 bytes
     
     std::stringstream ss;
     for (size_t i = 0; i < 16; ++i) {
@@ -102,16 +94,13 @@ bool UserIdentity::saveToFile(const std::string& filepath) const {
     if (!file.is_open()) {
         return false;
     }
-    
-    // Write username length and username
+
     uint32_t usernameLen = static_cast<uint32_t>(username_.size());
     file.write(reinterpret_cast<const char*>(&usernameLen), sizeof(usernameLen));
     file.write(username_.c_str(), usernameLen);
-    
-    // Write public key
+
     file.write(reinterpret_cast<const char*>(publicKey_.data()), publicKey_.size());
-    
-    // Write private key
+
     file.write(reinterpret_cast<const char*>(privateKey_.data()), privateKey_.size());
     
     return file.good();
@@ -122,8 +111,7 @@ bool UserIdentity::loadFromFile(const std::string& filepath) {
     if (!file.is_open()) {
         return false;
     }
-    
-    // Read username
+
     uint32_t usernameLen = 0;
     file.read(reinterpret_cast<char*>(&usernameLen), sizeof(usernameLen));
     
@@ -132,11 +120,9 @@ bool UserIdentity::loadFromFile(const std::string& filepath) {
         file.read(buffer.data(), usernameLen);
         username_ = std::string(buffer.begin(), buffer.end());
     }
-    
-    // Read public key
+
     file.read(reinterpret_cast<char*>(publicKey_.data()), publicKey_.size());
-    
-    // Read private key
+
     file.read(reinterpret_cast<char*>(privateKey_.data()), privateKey_.size());
     
     if (file.good()) {
