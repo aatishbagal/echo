@@ -91,7 +91,7 @@ void ConsoleUI::printHelp() const {
     std::cout << "/chat @username   - Start personal chat" << std::endl;
     std::cout << "/join #global     - Join global chat" << std::endl;
     std::cout << "/msg @user text   - Send quick message" << std::endl;
-    std::cout << "/file 'path'      - Send file to #global (size limit)" << std::endl;
+    std::cout << "/file 'path'      - Send file in chat mode" << std::endl;
     std::cout << "/accept <id>      - Accept a received file" << std::endl;
     std::cout << "/decline <id>     - Decline a received file" << std::endl;
     std::cout << "/who              - List online Echo users" << std::endl;
@@ -108,43 +108,15 @@ void ConsoleUI::printChatHelp() const {
     std::cout << "/exit             - Exit chat mode" << std::endl;
     std::cout << "/who              - List participants" << std::endl;
     std::cout << "/status           - Show current chat info" << std::endl;
+    std::cout << "/file 'path'      - Send file to chat" << std::endl;
+    std::cout << "/accept <id>      - Accept received file" << std::endl;
+    std::cout << "/decline <id>     - Decline received file" << std::endl;
     std::cout << "/help             - Show this help" << std::endl;
     std::cout << "Type messages and press Enter to send" << std::endl;
     std::cout << "==========================\n" << std::endl;
 }
 
 void ConsoleUI::handleCommand(const std::string& command, BluetoothManager& bluetoothManager, UserIdentity& identity) {
-    if (command.rfind("/file", 0) == 0 && currentChatMode_ != ChatMode::GLOBAL) {
-        size_t p1 = command.find('\'');
-        size_t p2 = command.find('\'', p1 == std::string::npos ? 0 : p1 + 1);
-        if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1 + 1) {
-            std::string path = command.substr(p1 + 1, p2 - p1 - 1);
-            bool ok = handleFileSend(path, bluetoothManager, identity);
-            std::cout << (ok ? "[GLOBAL] sent" : "[GLOBAL] failed") << std::endl;
-            std::cout << getPrompt();
-            return;
-        } else {
-            std::cout << "Usage: /file 'full_path'" << std::endl;
-            std::cout << getPrompt();
-            return;
-        }
-    }
-    if (command.rfind("/accept", 0) == 0 && currentChatMode_ != ChatMode::GLOBAL) {
-        std::istringstream iss(command);
-        std::string cmd, id; iss >> cmd >> id;
-        if (!id.empty()) handleFileAccept(id);
-        else std::cout << "Usage: /accept <id>" << std::endl;
-        std::cout << getPrompt();
-        return;
-    }
-    if (command.rfind("/decline", 0) == 0 && currentChatMode_ != ChatMode::GLOBAL) {
-        std::istringstream iss(command);
-        std::string cmd, id; iss >> cmd >> id;
-        if (!id.empty()) handleFileDecline(id);
-        else std::cout << "Usage: /decline <id>" << std::endl;
-        std::cout << getPrompt();
-        return;
-    }
     auto cmd = commandParser_.parse(command);
 
     if (!cmd.isValid && !command.empty()) {
@@ -390,18 +362,35 @@ void ConsoleUI::handleChatMode(const std::string& input, BluetoothManager& bluet
         return;
     }
 
+    if (input.rfind("/accept", 0) == 0) {
+        std::istringstream iss(input);
+        std::string cmd, id; iss >> cmd >> id;
+        if (!id.empty()) handleFileAccept(id);
+        else std::cout << "Usage: /accept <id>" << std::endl;
+        std::cout << getPrompt();
+        return;
+    }
+
+    if (input.rfind("/decline", 0) == 0) {
+        std::istringstream iss(input);
+        std::string cmd, id; iss >> cmd >> id;
+        if (!id.empty()) handleFileDecline(id);
+        else std::cout << "Usage: /decline <id>" << std::endl;
+        std::cout << getPrompt();
+        return;
+    }
+
     if (input.rfind("/file", 0) == 0) {
-        if (currentChatMode_ != ChatMode::GLOBAL) {
-            std::cout << "File sharing only in #global" << std::endl;
-            std::cout << getPrompt();
-            return;
-        }
         size_t p1 = input.find('\'');
         size_t p2 = input.find('\'', p1 == std::string::npos ? 0 : p1 + 1);
         if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1 + 1) {
             std::string path = input.substr(p1 + 1, p2 - p1 - 1);
             bool ok = handleFileSend(path, bluetoothManager, identity);
-            std::cout << (ok ? "[GLOBAL] sent" : "[GLOBAL] failed") << std::endl;
+            if (currentChatMode_ == ChatMode::GLOBAL) {
+                std::cout << (ok ? "[GLOBAL] sent" : "[GLOBAL] failed") << std::endl;
+            } else if (currentChatMode_ == ChatMode::PERSONAL) {
+                std::cout << (ok ? "[PERSONAL] sent to " + currentChatTarget_ : "[PERSONAL] failed") << std::endl;
+            }
         } else {
             std::cout << "Usage: /file 'full_path'" << std::endl;
         }
@@ -691,7 +680,10 @@ void ConsoleUI::processReceivedMessage(const Message& msg, const std::string& so
 }
 
 bool ConsoleUI::handleFileSend(const std::string& path, BluetoothManager& bluetoothManager, UserIdentity& identity) {
-    if (currentChatMode_ != ChatMode::GLOBAL) { std::cout << "Not in global chat" << std::endl; return false; }
+    if (currentChatMode_ != ChatMode::GLOBAL && currentChatMode_ != ChatMode::PERSONAL) {
+        std::cout << "Not in chat mode" << std::endl;
+        return false;
+    }
     std::error_code ec;
     std::filesystem::path p(path);
     if (!std::filesystem::exists(p, ec)) { std::cout << "File not found" << std::endl; return false; }
@@ -709,12 +701,24 @@ bool ConsoleUI::handleFileSend(const std::string& path, BluetoothManager& blueto
     std::string b64 = base64Encode(buf);
     std::string id = generateFileId();
     std::string fname = p.filename().string();
-    auto msg = MessageFactory::createFileDataMessage(id, identity.getUsername(), identity.getFingerprint(), fname, (uint32_t)sz, b64, true);
+
+    bool isGlobal = (currentChatMode_ == ChatMode::GLOBAL);
+    auto msg = MessageFactory::createFileDataMessage(id, identity.getUsername(), identity.getFingerprint(), fname, (uint32_t)sz, b64, isGlobal);
     auto data = msg.serialize();
     bool any = false;
-    if (wifi_) any = wifi_->sendBroadcast(data) || any;
-    auto devices = bluetoothManager.getEchoDevices();
-    for (const auto& d : devices) { any = bluetoothManager.sendData(d.address, data) || any; }
+
+    if (isGlobal) {
+        if (wifi_) any = wifi_->sendBroadcast(data) || any;
+        auto devices = bluetoothManager.getEchoDevices();
+        for (const auto& d : devices) { any = bluetoothManager.sendData(d.address, data) || any; }
+    } else {
+        if (wifi_) any = wifi_->sendTo(currentChatTarget_, data) || any;
+        std::string address = findAddressByUsername(currentChatTarget_, bluetoothManager);
+        if (!address.empty()) {
+            any = bluetoothManager.sendData(address, data) || any;
+        }
+    }
+
     if (!any) { std::cout << "No recipients" << std::endl; }
     return any;
 }
