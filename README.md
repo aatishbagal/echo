@@ -65,7 +65,7 @@ Echo is a cross-platform desktop messaging application written in C++ that enabl
 
 1. Clone the repository:
 ```cmd
-git clone <repository-url>
+git clone https://github.com/aatishbagal/echo.git
 cd echo
 ```
 
